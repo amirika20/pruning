@@ -1,0 +1,62 @@
+{
+  "training": {
+    "final_train_loss": 0.45309486985206604,
+    "final_val_loss": 0.783842921257019
+  },
+  "finetuning": {
+    "final_train_loss": 9.32196507485994e-12,
+    "final_val_loss": 2.3701484203338623
+  },
+  "pruning_per_layer": [
+    {
+      "layer": 0,
+      "neurons_before": 128,
+      "silent_removed": 0,
+      "redundant_removed": 55,
+      "total_removed": 55,
+      "neurons_after": 73
+    },
+    {
+      "layer": 1,
+      "neurons_before": 128,
+      "silent_removed": 5,
+      "redundant_removed": 0,
+      "total_removed": 5,
+      "neurons_after": 123
+    },
+    {
+      "layer": 2,
+      "neurons_before": 128,
+      "silent_removed": 7,
+      "redundant_removed": 0,
+      "total_removed": 7,
+      "neurons_after": 121
+    }
+  ],
+  "pruned": {
+    "params_before": 83329,
+    "params_after": 73040,
+    "params_reduction_pct": 12.35,
+    "model_size_before_kb": 325.504,
+    "model_size_after_kb": 285.312,
+    "flops_before": 165120,
+    "flops_after": 144676,
+    "flops_reduction_pct": 12.38,
+    "inference_time_before_us": 49.703,
+    "inference_time_after_us": 72.749,
+    "inference_speedup_pct": -46.37
+  },
+  "finetuned": {
+    "params_before": 83329,
+    "params_after": 73040,
+    "params_reduction_pct": 12.35,
+    "model_size_before_kb": 325.504,
+    "model_size_after_kb": 285.312,
+    "flops_before": 165120,
+    "flops_after": 144676,
+    "flops_reduction_pct": 12.38,
+    "inference_time_before_us": 51.024,
+    "inference_time_after_us": 77.224,
+    "inference_speedup_pct": -51.35
+  }
+}

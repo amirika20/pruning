@@ -1,0 +1,49 @@
+{
+  "data": {
+    "function": "mnist",
+    "n_samples": 2000,
+    "x_range": [
+      -12.56636,
+      12.56636
+    ],
+    "noise_std": 0.05,
+    "train_ratio": 0.8,
+    "seed": 42,
+    "mnist_root": "~/.cache/mnist"
+  },
+  "model": {
+    "hidden_sizes": [
+      32,
+      64,
+      32
+    ],
+    "arch": "rescnn",
+    "activation": "relu",
+    "input_channels": 1
+  },
+  "train": {
+    "optimizer": "adam",
+    "epochs": 500,
+    "lr": 0.001,
+    "momentum": 0.9,
+    "batch_size": 64,
+    "weight_decay": 0.0001,
+    "log_every": 10
+  },
+  "prune": {
+    "threshold": 0.1,
+    "prune_silent": true,
+    "prune_redundant": true
+  },
+  "finetune": {
+    "optimizer": "adam",
+    "epochs": 10,
+    "lr": 0.0001,
+    "momentum": 0.9,
+    "batch_size": 64,
+    "weight_decay": 0.0001,
+    "log_every": 5
+  },
+  "experiment_name": "mnist_rescnn",
+  "seed": 0
+}

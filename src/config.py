@@ -4,19 +4,21 @@ from typing import List
 
 @dataclass
 class DataConfig:
-    function: str = "sin"       # "sin" or "cos"
-    n_samples: int = 50
+    function: str = "sin"       # "sin", "cos", "complex", "circle", "square", "bullseye", "mnist"
+    n_samples: int = 50         # for mnist: total subset size (train+val split by train_ratio)
     x_range: tuple = (4*-3.14159, 4*3.14159)
     noise_std: float = 0.05
     train_ratio: float = 0.8
     seed: int = 42
+    mnist_root: str = "~/.cache/mnist"   # where torchvision downloads MNIST
 
 
 @dataclass
 class ModelConfig:
     hidden_sizes: List[int] = field(default_factory=lambda: [64, 64, 64])
-    arch: str = "mlp"   # "mlp" or "resnet"
+    arch: str = "mlp"          # "mlp", "resnet", or "cnn"
     activation: str = "relu"
+    input_channels: int = 1    # CNN only: number of input image channels
 
 
 @dataclass
@@ -44,4 +46,5 @@ class Config:
     train: TrainConfig = field(default_factory=TrainConfig)
     prune: PruneConfig = field(default_factory=PruneConfig)
     finetune: TrainConfig = field(default_factory=lambda: TrainConfig(epochs=200, log_every=50))
-    output_dir: str = "outputs"
+    experiment_name: str = "default"
+    seed: int = 0

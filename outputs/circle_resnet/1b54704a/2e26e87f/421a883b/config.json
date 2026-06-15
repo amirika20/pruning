@@ -1,0 +1,47 @@
+{
+  "data": {
+    "function": "circle",
+    "n_samples": 256,
+    "x_range": [
+      -12.56636,
+      12.56636
+    ],
+    "noise_std": 0.05,
+    "train_ratio": 0.8,
+    "seed": 42
+  },
+  "model": {
+    "hidden_sizes": [
+      128,
+      128,
+      128
+    ],
+    "arch": "resnet",
+    "activation": "relu"
+  },
+  "train": {
+    "optimizer": "gd",
+    "epochs": 5000,
+    "lr": 0.001,
+    "momentum": 0.9,
+    "batch_size": 64,
+    "weight_decay": 0.0,
+    "log_every": 50
+  },
+  "prune": {
+    "threshold": 0.1,
+    "prune_silent": true,
+    "prune_redundant": true
+  },
+  "finetune": {
+    "optimizer": "adam",
+    "epochs": 10000,
+    "lr": 0.001,
+    "momentum": 0.9,
+    "batch_size": 64,
+    "weight_decay": 0.0,
+    "log_every": 50
+  },
+  "experiment_name": "circle_resnet",
+  "seed": 0
+}

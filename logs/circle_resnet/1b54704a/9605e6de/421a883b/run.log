@@ -1,0 +1,354 @@
+14:34:09  Output dir : /home/amirabbas-kazeminia/Projects/pruning/outputs/circle_resnet/1b54704a/9605e6de/421a883b
+14:34:09  Log dir    : /home/amirabbas-kazeminia/Projects/pruning/logs/circle_resnet/1b54704a/9605e6de/421a883b
+14:34:09  Model: ResNet(
+  (blocks): ModuleList(
+    (0): ResidualBlock(
+      (branch): Sequential(
+        (0): Linear(in_features=2, out_features=64, bias=True)
+        (1): ReLU()
+        (2): Linear(in_features=64, out_features=64, bias=True)
+      )
+      (shortcut): Linear(in_features=2, out_features=64, bias=False)
+      (relu): ReLU()
+    )
+    (1): ResidualBlock(
+      (branch): Sequential(
+        (0): Linear(in_features=64, out_features=128, bias=True)
+        (1): ReLU()
+        (2): Linear(in_features=128, out_features=128, bias=True)
+      )
+      (shortcut): Linear(in_features=64, out_features=128, bias=False)
+      (relu): ReLU()
+    )
+    (2): ResidualBlock(
+      (branch): Sequential(
+        (0): Linear(in_features=128, out_features=128, bias=True)
+        (1): ReLU()
+        (2): Linear(in_features=128, out_features=128, bias=True)
+      )
+      (shortcut): Identity()
+      (relu): ReLU()
+    )
+  )
+  (head): Linear(in_features=128, out_features=1, bias=True)
+)
+14:34:09  Fitting circle(x) with 70657 parameters
+14:34:09  === Training ===
+14:34:11  Epoch   50 | train 0.497111 | val 0.805877
+14:34:11  Epoch  100 | train 0.487371 | val 0.799524
+14:34:11  Epoch  150 | train 0.479784 | val 0.794813
+14:34:12  Epoch  200 | train 0.473549 | val 0.789381
+14:34:12  Epoch  250 | train 0.467923 | val 0.783808
+14:34:12  Epoch  300 | train 0.462783 | val 0.778135
+14:34:12  Epoch  350 | train 0.458176 | val 0.772959
+14:34:13  Epoch  400 | train 0.453905 | val 0.767650
+14:34:13  Epoch  450 | train 0.449761 | val 0.762656
+14:34:13  Epoch  500 | train 0.445615 | val 0.757876
+14:34:13  Epoch  550 | train 0.441671 | val 0.753281
+14:34:13  Epoch  600 | train 0.437924 | val 0.748803
+14:34:14  Epoch  650 | train 0.434481 | val 0.744356
+14:34:14  Epoch  700 | train 0.431206 | val 0.739848
+14:34:14  Epoch  750 | train 0.428024 | val 0.735313
+14:34:14  Epoch  800 | train 0.424889 | val 0.730908
+14:34:14  Epoch  850 | train 0.421810 | val 0.726700
+14:34:15  Epoch  900 | train 0.418880 | val 0.722631
+14:34:15  Epoch  950 | train 0.416052 | val 0.718685
+14:34:15  Epoch 1000 | train 0.413343 | val 0.714743
+14:34:15  Epoch 1050 | train 0.410686 | val 0.710859
+14:34:16  Epoch 1100 | train 0.408026 | val 0.706997
+14:34:16  Epoch 1150 | train 0.405452 | val 0.703140
+14:34:16  Epoch 1200 | train 0.402930 | val 0.699399
+14:34:16  Epoch 1250 | train 0.400493 | val 0.695858
+14:34:16  Epoch 1300 | train 0.398104 | val 0.692224
+14:34:17  Epoch 1350 | train 0.395854 | val 0.688988
+14:34:17  Epoch 1400 | train 0.393634 | val 0.685616
+14:34:17  Epoch 1450 | train 0.391555 | val 0.682691
+14:34:17  Epoch 1500 | train 0.389552 | val 0.679815
+14:34:17  Epoch 1550 | train 0.387632 | val 0.676967
+14:34:18  Epoch 1600 | train 0.385766 | val 0.674190
+14:34:18  Epoch 1650 | train 0.383924 | val 0.671543
+14:34:18  Epoch 1700 | train 0.382127 | val 0.668974
+14:34:18  Epoch 1750 | train 0.380372 | val 0.666510
+14:34:18  Epoch 1800 | train 0.378667 | val 0.664148
+14:34:19  Epoch 1850 | train 0.377012 | val 0.661840
+14:34:19  Epoch 1900 | train 0.375407 | val 0.659659
+14:34:19  Epoch 1950 | train 0.373841 | val 0.657545
+14:34:19  Epoch 2000 | train 0.372317 | val 0.655343
+14:34:19  Epoch 2050 | train 0.370838 | val 0.653245
+14:34:20  Epoch 2100 | train 0.369397 | val 0.651135
+14:34:20  Epoch 2150 | train 0.367989 | val 0.649110
+14:34:20  Epoch 2200 | train 0.366621 | val 0.647162
+14:34:20  Epoch 2250 | train 0.365272 | val 0.645306
+14:34:21  Epoch 2300 | train 0.363963 | val 0.643419
+14:34:21  Epoch 2350 | train 0.362676 | val 0.641885
+14:34:21  Epoch 2400 | train 0.361430 | val 0.640153
+14:34:21  Epoch 2450 | train 0.360222 | val 0.638393
+14:34:21  Epoch 2500 | train 0.359047 | val 0.636797
+14:34:22  Epoch 2550 | train 0.357908 | val 0.635114
+14:34:22  Epoch 2600 | train 0.356799 | val 0.633580
+14:34:22  Epoch 2650 | train 0.355725 | val 0.632320
+14:34:22  Epoch 2700 | train 0.354659 | val 0.630749
+14:34:22  Epoch 2750 | train 0.353633 | val 0.629528
+14:34:23  Epoch 2800 | train 0.352627 | val 0.628400
+14:34:23  Epoch 2850 | train 0.351655 | val 0.627154
+14:34:23  Epoch 2900 | train 0.350715 | val 0.626169
+14:34:23  Epoch 2950 | train 0.349795 | val 0.625151
+14:34:24  Epoch 3000 | train 0.348894 | val 0.624301
+14:34:24  Epoch 3050 | train 0.348023 | val 0.623420
+14:34:24  Epoch 3100 | train 0.347178 | val 0.622720
+14:34:24  Epoch 3150 | train 0.346364 | val 0.622020
+14:34:24  Epoch 3200 | train 0.345566 | val 0.621160
+14:34:25  Epoch 3250 | train 0.344791 | val 0.620516
+14:34:25  Epoch 3300 | train 0.344040 | val 0.619840
+14:34:25  Epoch 3350 | train 0.343310 | val 0.619233
+14:34:25  Epoch 3400 | train 0.342621 | val 0.618594
+14:34:25  Epoch 3450 | train 0.341946 | val 0.617941
+14:34:26  Epoch 3500 | train 0.341283 | val 0.617431
+14:34:26  Epoch 3550 | train 0.340655 | val 0.617047
+14:34:26  Epoch 3600 | train 0.340022 | val 0.616644
+14:34:26  Epoch 3650 | train 0.339408 | val 0.616238
+14:34:26  Epoch 3700 | train 0.338822 | val 0.615804
+14:34:27  Epoch 3750 | train 0.338241 | val 0.615364
+14:34:27  Epoch 3800 | train 0.337652 | val 0.615010
+14:34:27  Epoch 3850 | train 0.337092 | val 0.614714
+14:34:27  Epoch 3900 | train 0.336554 | val 0.614348
+14:34:27  Epoch 3950 | train 0.336037 | val 0.613947
+14:34:28  Epoch 4000 | train 0.335520 | val 0.613525
+14:34:28  Epoch 4050 | train 0.335014 | val 0.613515
+14:34:28  Epoch 4100 | train 0.334511 | val 0.613220
+14:34:28  Epoch 4150 | train 0.334030 | val 0.613051
+14:34:28  Epoch 4200 | train 0.333559 | val 0.612942
+14:34:29  Epoch 4250 | train 0.333099 | val 0.612699
+14:34:29  Epoch 4300 | train 0.332653 | val 0.612792
+14:34:29  Epoch 4350 | train 0.332208 | val 0.612407
+14:34:29  Epoch 4400 | train 0.331781 | val 0.612169
+14:34:30  Epoch 4450 | train 0.331340 | val 0.612303
+14:34:30  Epoch 4500 | train 0.330903 | val 0.612054
+14:34:30  Epoch 4550 | train 0.330469 | val 0.611824
+14:34:30  Epoch 4600 | train 0.330028 | val 0.611448
+14:34:31  Epoch 4650 | train 0.329542 | val 0.611457
+14:34:31  Epoch 4700 | train 0.329085 | val 0.611293
+14:34:31  Epoch 4750 | train 0.328690 | val 0.611210
+14:34:31  Epoch 4800 | train 0.328282 | val 0.611122
+14:34:31  Epoch 4850 | train 0.327896 | val 0.611023
+14:34:32  Epoch 4900 | train 0.327485 | val 0.610960
+14:34:32  Epoch 4950 | train 0.327097 | val 0.611090
+14:34:32  Epoch 5000 | train 0.326719 | val 0.611064
+14:34:32  === Pruning ===
+14:34:32    Layer 0: silent=0  redundant=27  | removed=27  remaining=37
+14:34:32    Layer 1: silent=10  redundant=0  | removed=10  remaining=118
+14:34:32    Layer 2: silent=10  redundant=0  | removed=10  remaining=118
+14:34:32    Total removed: 47
+14:34:33  === Efficiency: original vs pruned ===
+14:34:33    Parameters :   70,657  →    64,348   (8.9% reduction)
+14:34:33    Model size :   276.00 KB  →    251.36 KB
+14:34:33    FLOPs      :  140,032  →   127,508   (8.9% reduction)
+14:34:33    Infer time :   121.08 µs  →     76.38 µs   (36.9% faster)
+14:34:33  === Fine-tuning ===
+14:34:33  Epoch   50 | train 0.340940 | val 0.613286
+14:34:33  Epoch  100 | train 0.295151 | val 0.622380
+14:34:33  Epoch  150 | train 0.255180 | val 0.632878
+14:34:34  Epoch  200 | train 0.219845 | val 0.644539
+14:34:34  Epoch  250 | train 0.196794 | val 0.750187
+14:34:34  Epoch  300 | train 0.154885 | val 0.737361
+14:34:34  Epoch  350 | train 0.141897 | val 0.750349
+14:34:35  Epoch  400 | train 0.120140 | val 0.775619
+14:34:35  Epoch  450 | train 0.101937 | val 0.792695
+14:34:35  Epoch  500 | train 0.117542 | val 0.898377
+14:34:36  Epoch  550 | train 0.073858 | val 0.853221
+14:34:36  Epoch  600 | train 0.068502 | val 0.850050
+14:34:36  Epoch  650 | train 0.060974 | val 0.880654
+14:34:36  Epoch  700 | train 0.056934 | val 0.909460
+14:34:37  Epoch  750 | train 0.091794 | val 0.964888
+14:34:37  Epoch  800 | train 0.050614 | val 0.917427
+14:34:37  Epoch  850 | train 0.045830 | val 0.908006
+14:34:38  Epoch  900 | train 0.043943 | val 0.913278
+14:34:38  Epoch  950 | train 0.041312 | val 0.927554
+14:34:38  Epoch 1000 | train 0.040935 | val 0.924971
+14:34:39  Epoch 1050 | train 0.035146 | val 0.899221
+14:34:39  Epoch 1100 | train 0.041678 | val 0.853226
+14:34:39  Epoch 1150 | train 0.028786 | val 0.857599
+14:34:40  Epoch 1200 | train 0.036512 | val 0.895267
+14:34:40  Epoch 1250 | train 0.026043 | val 0.863227
+14:34:40  Epoch 1300 | train 0.026542 | val 0.857680
+14:34:41  Epoch 1350 | train 0.024427 | val 0.839388
+14:34:41  Epoch 1400 | train 0.022901 | val 0.840179
+14:34:41  Epoch 1450 | train 0.022017 | val 0.848500
+14:34:42  Epoch 1500 | train 0.020757 | val 0.854422
+14:34:42  Epoch 1550 | train 0.018651 | val 0.857819
+14:34:43  Epoch 1600 | train 0.213972 | val 0.877201
+14:34:43  Epoch 1650 | train 0.032662 | val 0.977890
+14:34:43  Epoch 1700 | train 0.020692 | val 0.950142
+14:34:44  Epoch 1750 | train 0.016338 | val 0.988570
+14:34:44  Epoch 1800 | train 0.014909 | val 1.007520
+14:34:44  Epoch 1850 | train 0.012368 | val 1.016225
+14:34:45  Epoch 1900 | train 0.010543 | val 1.018819
+14:34:45  Epoch 1950 | train 0.009713 | val 1.031703
+14:34:45  Epoch 2000 | train 0.008937 | val 1.025787
+14:34:45  Epoch 2050 | train 0.009942 | val 1.019582
+14:34:46  Epoch 2100 | train 0.011105 | val 1.043838
+14:34:46  Epoch 2150 | train 0.005981 | val 1.008122
+14:34:46  Epoch 2200 | train 0.005281 | val 1.014452
+14:34:47  Epoch 2250 | train 0.008141 | val 1.053533
+14:34:47  Epoch 2300 | train 0.002180 | val 1.020236
+14:34:47  Epoch 2350 | train 0.002587 | val 1.023525
+14:34:48  Epoch 2400 | train 0.000858 | val 1.013183
+14:34:48  Epoch 2450 | train 0.000283 | val 1.023242
+14:34:48  Epoch 2500 | train 0.000126 | val 1.016453
+14:34:49  Epoch 2550 | train 0.014498 | val 1.003847
+14:34:49  Epoch 2600 | train 0.010571 | val 0.924439
+14:34:49  Epoch 2650 | train 0.062976 | val 1.006056
+14:34:50  Epoch 2700 | train 0.009131 | val 0.929325
+14:34:50  Epoch 2750 | train 0.004994 | val 0.968026
+14:34:50  Epoch 2800 | train 0.005904 | val 0.985226
+14:34:51  Epoch 2850 | train 0.001239 | val 0.974399
+14:34:51  Epoch 2900 | train 0.001040 | val 0.973644
+14:34:51  Epoch 2950 | train 0.002224 | val 0.974506
+14:34:52  Epoch 3000 | train 0.001917 | val 0.977778
+14:34:52  Epoch 3050 | train 0.000332 | val 0.973072
+14:34:52  Epoch 3100 | train 0.000080 | val 0.971980
+14:34:53  Epoch 3150 | train 0.000092 | val 0.971456
+14:34:53  Epoch 3200 | train 0.001584 | val 0.955522
+14:34:53  Epoch 3250 | train 0.001528 | val 0.947378
+14:34:54  Epoch 3300 | train 0.000231 | val 0.950183
+14:34:54  Epoch 3350 | train 0.000106 | val 0.948132
+14:34:54  Epoch 3400 | train 0.000211 | val 0.950428
+14:34:55  Epoch 3450 | train 0.000053 | val 0.949168
+14:34:55  Epoch 3500 | train 0.011388 | val 0.871056
+14:34:55  Epoch 3550 | train 0.000476 | val 0.953770
+14:34:56  Epoch 3600 | train 0.000092 | val 0.958835
+14:34:56  Epoch 3650 | train 0.000058 | val 0.963239
+14:34:57  Epoch 3700 | train 0.000131 | val 0.960577
+14:34:57  Epoch 3750 | train 0.000038 | val 0.964854
+14:34:57  Epoch 3800 | train 0.000031 | val 0.967688
+14:34:58  Epoch 3850 | train 0.000027 | val 0.969426
+14:34:58  Epoch 3900 | train 0.000024 | val 0.970950
+14:34:58  Epoch 3950 | train 0.000022 | val 0.972224
+14:34:59  Epoch 4000 | train 0.000021 | val 0.973257
+14:34:59  Epoch 4050 | train 0.000019 | val 0.974044
+14:34:59  Epoch 4100 | train 0.000018 | val 0.974682
+14:35:00  Epoch 4150 | train 0.080293 | val 1.036306
+14:35:00  Epoch 4200 | train 0.031072 | val 1.000897
+14:35:00  Epoch 4250 | train 0.026022 | val 1.046239
+14:35:01  Epoch 4300 | train 0.022504 | val 1.049177
+14:35:01  Epoch 4350 | train 0.018318 | val 1.085381
+14:35:01  Epoch 4400 | train 0.014742 | val 1.105418
+14:35:02  Epoch 4450 | train 0.013725 | val 1.131871
+14:35:02  Epoch 4500 | train 0.010419 | val 1.152868
+14:35:02  Epoch 4550 | train 0.011730 | val 1.170660
+14:35:03  Epoch 4600 | train 0.008516 | val 1.154908
+14:35:03  Epoch 4650 | train 0.007388 | val 1.159621
+14:35:03  Epoch 4700 | train 0.006363 | val 1.171026
+14:35:04  Epoch 4750 | train 0.004557 | val 1.163495
+14:35:04  Epoch 4800 | train 0.005995 | val 1.148279
+14:35:04  Epoch 4850 | train 0.006667 | val 1.142858
+14:35:05  Epoch 4900 | train 0.009900 | val 1.223651
+14:35:05  Epoch 4950 | train 0.004515 | val 1.225809
+14:35:05  Epoch 5000 | train 0.002454 | val 1.242797
+14:35:06  Epoch 5050 | train 0.040162 | val 1.113517
+14:35:06  Epoch 5100 | train 0.001092 | val 1.177993
+14:35:06  Epoch 5150 | train 0.000483 | val 1.181751
+14:35:07  Epoch 5200 | train 0.001085 | val 1.174914
+14:35:07  Epoch 5250 | train 0.000122 | val 1.150578
+14:35:07  Epoch 5300 | train 0.000959 | val 1.156307
+14:35:08  Epoch 5350 | train 0.000011 | val 1.150248
+14:35:08  Epoch 5400 | train 0.000004 | val 1.151726
+14:35:09  Epoch 5450 | train 0.000003 | val 1.151000
+14:35:09  Epoch 5500 | train 0.000003 | val 1.150613
+14:35:09  Epoch 5550 | train 0.000003 | val 1.150483
+14:35:10  Epoch 5600 | train 0.000003 | val 1.150389
+14:35:10  Epoch 5650 | train 0.000003 | val 1.150295
+14:35:10  Epoch 5700 | train 0.000002 | val 1.150134
+14:35:11  Epoch 5750 | train 0.000002 | val 1.149973
+14:35:11  Epoch 5800 | train 0.000002 | val 1.149797
+14:35:11  Epoch 5850 | train 0.000027 | val 1.149176
+14:35:12  Epoch 5900 | train 0.000002 | val 1.148325
+14:35:12  Epoch 5950 | train 0.000002 | val 1.148147
+14:35:13  Epoch 6000 | train 0.002089 | val 1.162780
+14:35:13  Epoch 6050 | train 0.008622 | val 1.071638
+14:35:13  Epoch 6100 | train 0.005358 | val 1.085811
+14:35:14  Epoch 6150 | train 0.005659 | val 1.136435
+14:35:14  Epoch 6200 | train 0.002671 | val 1.124029
+14:35:14  Epoch 6250 | train 0.000097 | val 1.110129
+14:35:15  Epoch 6300 | train 0.000012 | val 1.115585
+14:35:15  Epoch 6350 | train 0.000006 | val 1.115456
+14:35:15  Epoch 6400 | train 0.068136 | val 1.086832
+14:35:16  Epoch 6450 | train 0.027544 | val 0.811718
+14:35:16  Epoch 6500 | train 0.017009 | val 0.856951
+14:35:16  Epoch 6550 | train 0.005732 | val 0.886106
+14:35:17  Epoch 6600 | train 0.001409 | val 0.914165
+14:35:17  Epoch 6650 | train 0.000201 | val 0.919593
+14:35:17  Epoch 6700 | train 0.000028 | val 0.921333
+14:35:18  Epoch 6750 | train 0.000014 | val 0.924912
+14:35:18  Epoch 6800 | train 0.000012 | val 0.926071
+14:35:18  Epoch 6850 | train 0.000011 | val 0.926524
+14:35:19  Epoch 6900 | train 0.000010 | val 0.926695
+14:35:19  Epoch 6950 | train 0.000009 | val 0.926953
+14:35:20  Epoch 7000 | train 0.000009 | val 0.927230
+14:35:20  Epoch 7050 | train 0.000008 | val 0.927581
+14:35:20  Epoch 7100 | train 0.000008 | val 0.927880
+14:35:21  Epoch 7150 | train 0.000007 | val 0.928254
+14:35:21  Epoch 7200 | train 0.000007 | val 0.928511
+14:35:21  Epoch 7250 | train 0.000027 | val 0.932721
+14:35:22  Epoch 7300 | train 0.000007 | val 0.934776
+14:35:22  Epoch 7350 | train 0.000006 | val 0.935161
+14:35:22  Epoch 7400 | train 0.000006 | val 0.935576
+14:35:23  Epoch 7450 | train 0.035808 | val 0.895186
+14:35:23  Epoch 7500 | train 0.004429 | val 0.910123
+14:35:23  Epoch 7550 | train 0.005346 | val 0.940320
+14:35:24  Epoch 7600 | train 0.000351 | val 0.923859
+14:35:24  Epoch 7650 | train 0.000397 | val 0.916884
+14:35:24  Epoch 7700 | train 0.000042 | val 0.914547
+14:35:25  Epoch 7750 | train 0.000011 | val 0.913639
+14:35:25  Epoch 7800 | train 0.000008 | val 0.914075
+14:35:26  Epoch 7850 | train 0.000007 | val 0.914417
+14:35:26  Epoch 7900 | train 0.000006 | val 0.914641
+14:35:26  Epoch 7950 | train 0.000005 | val 0.914812
+14:35:27  Epoch 8000 | train 0.000004 | val 0.914850
+14:35:27  Epoch 8050 | train 0.026063 | val 1.027621
+14:35:27  Epoch 8100 | train 0.000212 | val 1.062451
+14:35:28  Epoch 8150 | train 0.000017 | val 1.063923
+14:35:28  Epoch 8200 | train 0.000008 | val 1.063689
+14:35:29  Epoch 8250 | train 0.000006 | val 1.063908
+14:35:29  Epoch 8300 | train 0.000005 | val 1.064607
+14:35:29  Epoch 8350 | train 0.000004 | val 1.065131
+14:35:30  Epoch 8400 | train 0.000003 | val 1.065672
+14:35:30  Epoch 8450 | train 0.000003 | val 1.066154
+14:35:30  Epoch 8500 | train 0.000002 | val 1.066655
+14:35:31  Epoch 8550 | train 0.000002 | val 1.067162
+14:35:31  Epoch 8600 | train 0.000002 | val 1.067674
+14:35:32  Epoch 8650 | train 0.000002 | val 1.068115
+14:35:32  Epoch 8700 | train 0.000002 | val 1.068531
+14:35:33  Epoch 8750 | train 0.000002 | val 1.068938
+14:35:33  Epoch 8800 | train 0.000001 | val 1.069294
+14:35:33  Epoch 8850 | train 0.000001 | val 1.069671
+14:35:34  Epoch 8900 | train 0.000001 | val 1.070032
+14:35:34  Epoch 8950 | train 0.000001 | val 1.070332
+14:35:34  Epoch 9000 | train 0.000001 | val 1.070600
+14:35:35  Epoch 9050 | train 0.000001 | val 1.070878
+14:35:35  Epoch 9100 | train 0.000001 | val 1.071134
+14:35:36  Epoch 9150 | train 0.000001 | val 1.071405
+14:35:36  Epoch 9200 | train 0.000001 | val 1.071611
+14:35:37  Epoch 9250 | train 0.027915 | val 0.867932
+14:35:37  Epoch 9300 | train 0.009543 | val 0.916390
+14:35:38  Epoch 9350 | train 0.005516 | val 1.000270
+14:35:38  Epoch 9400 | train 0.000628 | val 0.996377
+14:35:38  Epoch 9450 | train 0.000024 | val 1.006816
+14:35:39  Epoch 9500 | train 0.000008 | val 1.008301
+14:35:39  Epoch 9550 | train 0.000004 | val 1.008563
+14:35:39  Epoch 9600 | train 0.000003 | val 1.008646
+14:35:40  Epoch 9650 | train 0.000003 | val 1.008661
+14:35:40  Epoch 9700 | train 0.000003 | val 1.008634
+14:35:40  Epoch 9750 | train 0.000002 | val 1.008565
+14:35:41  Epoch 9800 | train 0.000002 | val 1.008484
+14:35:41  Epoch 9850 | train 0.000002 | val 1.008408
+14:35:41  Epoch 9900 | train 0.000451 | val 1.012742
+14:35:42  Epoch 9950 | train 0.000001 | val 1.009643
+14:35:42  Epoch 10000 | train 0.000001 | val 1.009727
+14:35:43  === Efficiency: original vs fine-tuned ===
+14:35:43    Parameters :   70,657  →    64,348   (8.9% reduction)
+14:35:43    Model size :   276.00 KB  →    251.36 KB
+14:35:43    FLOPs      :  140,032  →   127,508   (8.9% reduction)
+14:35:43    Infer time :   119.38 µs  →     75.50 µs   (36.8% faster)
+14:35:43  Saved results to /home/amirabbas-kazeminia/Projects/pruning/outputs/circle_resnet/1b54704a/9605e6de/421a883b/results.json
+14:35:43  Saved pruning summary to /home/amirabbas-kazeminia/Projects/pruning/outputs/circle_resnet/1b54704a/9605e6de/421a883b/pruning_summary.png

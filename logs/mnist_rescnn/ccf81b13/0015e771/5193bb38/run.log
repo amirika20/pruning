@@ -1,0 +1,31 @@
+16:03:45  Device     : cuda (NVIDIA GeForce RTX 4090 Laptop GPU, 1 device(s))
+16:03:45  Output dir : /home/amirabbas-kazeminia/Projects/pruning/outputs/mnist_rescnn/ccf81b13/0015e771/5193bb38
+16:03:45  Log dir    : /home/amirabbas-kazeminia/Projects/pruning/logs/mnist_rescnn/ccf81b13/0015e771/5193bb38
+16:03:45  Model      : RESCNN  (97,674 params)
+16:03:45  Task       : multiclass  (10 classes)
+16:03:45  Data       : mnist  (train=1600, val=400)
+16:03:45  === Training ===
+16:03:47  Epoch    5 | train 1.021997 | val 0.955058
+16:03:48  Epoch   10 | train 0.431944 | val 0.424394
+16:03:48  Epoch   15 | train 0.223263 | val 0.290979
+16:03:49  Epoch   20 | train 0.133830 | val 0.184361
+16:03:49  === Pruning ===
+16:03:50    Layer 0: silent=0  redundant=0  | removed=0  remaining=32
+16:03:50    Layer 1: silent=0  redundant=0  | removed=0  remaining=64
+16:03:50    Layer 2: silent=0  redundant=0  | removed=0  remaining=32
+16:03:50    Total removed: 0
+16:03:51  === Efficiency: original vs pruned ===
+16:03:51    Parameters :   97,674  →    97,674   (0.0% reduction)
+16:03:51    Model size :   381.54 KB  →    381.54 KB
+16:03:51    FLOPs      : 12,362,368  →  12,362,368   (0.0% reduction)
+16:03:51    Infer time :   205.65 µs  →    207.31 µs   (-0.8% faster)
+16:03:51  === Fine-tuning ===
+16:03:52  Epoch    5 | train 0.088877 | val 0.131352
+16:03:53  Epoch   10 | train 0.076938 | val 0.125523
+16:03:54  === Efficiency: original vs fine-tuned ===
+16:03:54    Parameters :   97,674  →    97,674   (0.0% reduction)
+16:03:54    Model size :   381.54 KB  →    381.54 KB
+16:03:54    FLOPs      : 12,362,368  →  12,362,368   (0.0% reduction)
+16:03:54    Infer time :   213.26 µs  →    207.95 µs   (2.5% faster)
+16:03:54  Saved results to /home/amirabbas-kazeminia/Projects/pruning/outputs/mnist_rescnn/ccf81b13/0015e771/5193bb38/results.json
+16:03:54  Saved pruning summary to /home/amirabbas-kazeminia/Projects/pruning/outputs/mnist_rescnn/ccf81b13/0015e771/5193bb38/pruning_summary.png

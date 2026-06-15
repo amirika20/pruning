@@ -1,3 +1,4 @@
+import logging
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -15,14 +16,30 @@ def _build_optimizer(model: nn.Module, cfg: TrainConfig) -> torch.optim.Optimize
             model.parameters(), lr=cfg.lr, momentum=cfg.momentum, weight_decay=cfg.weight_decay
         )
     if name == "gd":
-        # Full-batch gradient descent: SGD with no momentum and batch_size == dataset size
         return torch.optim.SGD(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     raise ValueError(f"Unknown optimizer: {cfg.optimizer!r}. Choose from: adam, sgd, gd, rmsprop")
 
 
-def train(model: nn.Module, train_loader: DataLoader, val_loader: DataLoader, cfg: TrainConfig):
+def train(
+    model: nn.Module,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    cfg: TrainConfig,
+    task: str = "regression",
+):
+    """Train the model.
+
+    task: "regression"      → MSELoss,          labels float [B, 1]
+          "classification"  → MSELoss,          labels float [B, 1]  (±1 targets)
+          "multiclass"      → CrossEntropyLoss, labels long  [B]
+    """
+    device = next(model.parameters()).device
     optimizer = _build_optimizer(model, cfg)
-    loss_fn = nn.MSELoss()
+
+    if task == "multiclass":
+        loss_fn = nn.CrossEntropyLoss()
+    else:
+        loss_fn = nn.MSELoss()
 
     train_losses, val_losses = [], []
 
@@ -30,6 +47,8 @@ def train(model: nn.Module, train_loader: DataLoader, val_loader: DataLoader, cf
         model.train()
         epoch_loss = 0.0
         for x_batch, y_batch in train_loader:
+            x_batch = x_batch.to(device)
+            y_batch = y_batch.to(device)
             optimizer.zero_grad()
             pred = model(x_batch)
             loss = loss_fn(pred, y_batch)
@@ -42,11 +61,13 @@ def train(model: nn.Module, train_loader: DataLoader, val_loader: DataLoader, cf
         with torch.no_grad():
             val_loss = 0.0
             for x_batch, y_batch in val_loader:
+                x_batch = x_batch.to(device)
+                y_batch = y_batch.to(device)
                 pred = model(x_batch)
                 val_loss += loss_fn(pred, y_batch).item() * len(x_batch)
             val_losses.append(val_loss / len(val_loader.dataset))
 
         if epoch % cfg.log_every == 0:
-            print(f"Epoch {epoch:4d} | train {train_losses[-1]:.6f} | val {val_losses[-1]:.6f}")
+            logging.info(f"Epoch {epoch:4d} | train {train_losses[-1]:.6f} | val {val_losses[-1]:.6f}")
 
     return train_losses, val_losses
