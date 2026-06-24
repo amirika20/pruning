@@ -1,0 +1,15 @@
+15:54:40  ============================================================
+15:54:40  Experiment: mnist_flat_resmlp
+15:54:40  ============================================================
+15:54:40  Already exists at /home/amirabbas-kazeminia/Projects/pruning/outputs/mnist_flat_resmlp/3c5109c4/9c83719d/db5f02d8 — skipping.
+15:55:18  ============================================================
+15:55:18  Experiment: mnist_flat_resmlp
+15:55:18  ============================================================
+15:55:18  Model      : RESNET  (1,477,642 params)
+15:55:18  Task       : multiclass  (10 classes)
+15:55:18  Data       : mnist_flat  (train=1600, val=400)
+15:55:18  === Training ===
+15:55:19  Epoch   10 | train 0.032899 | val 0.332582 | acc 0.9250
+15:55:19  Epoch   20 | train 0.023303 | val 0.467862 | acc 0.9225
+15:55:19  Epoch   30 | train 0.000064 | val 0.453700 | acc 0.9450
+15:55:20  Epoch   40 | train 0.000059 | val 0.449711 | acc 0.9450

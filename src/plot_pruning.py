@@ -112,6 +112,10 @@ def plot_pruning_summary(
     val_losses: List[float],
     ft_train_losses: List[float],
     ft_val_losses: List[float],
+    train_accs: List[float],
+    val_accs: List[float],
+    ft_train_accs: List[float],
+    ft_val_accs: List[float],
     train_ds: TensorDataset,
     val_ds: TensorDataset,
     cfg: DataConfig,
@@ -119,62 +123,82 @@ def plot_pruning_summary(
 ):
     os.makedirs(output_dir, exist_ok=True)
 
-    x_train = train_ds.tensors[0].numpy()          # [N, 1] or [N, 2]
-    y_train = train_ds.tensors[1].numpy().squeeze() # [N]
-    x_val   = val_ds.tensors[0].numpy()
-    y_val   = val_ds.tensors[1].numpy().squeeze()
-
     e1 = len(train_losses)
     e2 = len(ft_train_losses)
     epochs    = list(range(1, e1 + e2 + 1))
     all_train = train_losses + ft_train_losses
     all_val   = val_losses   + ft_val_losses
 
-    fig = plt.figure(figsize=(16, 8))
-    gs  = gridspec.GridSpec(2, 4, figure=fig, hspace=0.4, wspace=0.35)
-
-    ax_loss   = fig.add_subplot(gs[:, :2])
-    ax_before = fig.add_subplot(gs[0,  2])
-    ax_pruned = fig.add_subplot(gs[0,  3])
-    ax_ft     = fig.add_subplot(gs[1, 2:])
-
-    # Loss panel (same for both tasks)
-    ax_loss.plot(epochs, all_train, label="train")
-    ax_loss.plot(epochs, all_val,   label="val")
-    ax_loss.axvline(x=e1 + 0.5, color="red", linestyle="--", linewidth=1.5, label="pruning")
-    ax_loss.set_xlabel("Epoch")
-    ax_loss.set_ylabel("Loss")
-    ax_loss.set_title("Loss")
-    ax_loss.legend()
-    ax_loss.grid(True, alpha=0.3)
-
     task = get_task(cfg)
-    if task == "regression":
-        x_train_1d = x_train.squeeze()
-        x_val_1d   = x_val.squeeze()
-        x_line  = np.linspace(cfg.x_range[0], cfg.x_range[1], 500)
-        y_true  = _true_fn(x_line, cfg)
-        _draw_fit(ax_before, x_train_1d, y_train, x_val_1d, y_val,
-                  x_line, y_true, _predict_1d(model_before,   x_line), "Before pruning")
-        _draw_fit(ax_pruned, x_train_1d, y_train, x_val_1d, y_val,
-                  x_line, y_true, _predict_1d(model_pruned,   x_line), "After pruning")
-        _draw_fit(ax_ft,     x_train_1d, y_train, x_val_1d, y_val,
-                  x_line, y_true, _predict_1d(model_finetuned, x_line), "After fine-tuning")
-    elif task == "classification":
-        _draw_classification(ax_before, x_train, y_train, x_val, y_val,
-                             model_before,   cfg, "Before pruning")
-        _draw_classification(ax_pruned, x_train, y_train, x_val, y_val,
-                             model_pruned,   cfg, "After pruning")
-        _draw_classification(ax_ft,     x_train, y_train, x_val, y_val,
-                             model_finetuned, cfg, "After fine-tuning")
+
+    if task == "multiclass":
+        # Two-panel layout: loss (left) | accuracy (right)
+        fig, (ax_loss, ax_acc) = plt.subplots(1, 2, figsize=(14, 5))
+        fig.subplots_adjust(wspace=0.3)
+
+        ax_loss.plot(epochs, all_train, label="train loss")
+        ax_loss.plot(epochs, all_val,   label="val loss")
+        ax_loss.axvline(x=e1 + 0.5, color="red", linestyle="--", linewidth=1.5, label="pruning")
+        ax_loss.set_xlabel("Epoch")
+        ax_loss.set_ylabel("Loss")
+        ax_loss.set_title("Loss")
+        ax_loss.legend()
+        ax_loss.grid(True, alpha=0.3)
+
+        all_train_acc = train_accs + ft_train_accs
+        all_val_acc   = val_accs   + ft_val_accs
+        ax_acc.plot(epochs[:len(all_train_acc)], all_train_acc, label="train acc")
+        ax_acc.plot(epochs[:len(all_val_acc)],   all_val_acc,   label="val acc")
+        ax_acc.axvline(x=e1 + 0.5, color="red", linestyle="--", linewidth=1.5, label="pruning")
+        ax_acc.set_xlabel("Epoch")
+        ax_acc.set_ylabel("Accuracy")
+        ax_acc.set_title("Accuracy")
+        ax_acc.set_ylim(0, 1)
+        ax_acc.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f"{y:.0%}"))
+        ax_acc.legend()
+        ax_acc.grid(True, alpha=0.3)
+
     else:
-        # multiclass (e.g. MNIST): no spatial visualisation — show accuracy summary
-        for ax, label in [(ax_before, "Before pruning"),
-                          (ax_pruned, "After pruning"),
-                          (ax_ft,     "After fine-tuning")]:
-            ax.axis("off")
-            ax.text(0.5, 0.5, label, ha="center", va="center",
-                    transform=ax.transAxes, fontsize=11, color="gray")
+        x_train = train_ds.tensors[0].numpy()
+        y_train = train_ds.tensors[1].numpy().squeeze()
+        x_val   = val_ds.tensors[0].numpy()
+        y_val   = val_ds.tensors[1].numpy().squeeze()
+
+        fig = plt.figure(figsize=(16, 8))
+        gs  = gridspec.GridSpec(2, 4, figure=fig, hspace=0.4, wspace=0.35)
+
+        ax_loss   = fig.add_subplot(gs[:, :2])
+        ax_before = fig.add_subplot(gs[0,  2])
+        ax_pruned = fig.add_subplot(gs[0,  3])
+        ax_ft     = fig.add_subplot(gs[1, 2:])
+
+        ax_loss.plot(epochs, all_train, label="train")
+        ax_loss.plot(epochs, all_val,   label="val")
+        ax_loss.axvline(x=e1 + 0.5, color="red", linestyle="--", linewidth=1.5, label="pruning")
+        ax_loss.set_xlabel("Epoch")
+        ax_loss.set_ylabel("Loss")
+        ax_loss.set_title("Loss")
+        ax_loss.legend()
+        ax_loss.grid(True, alpha=0.3)
+
+        if task == "regression":
+            x_train_1d = x_train.squeeze()
+            x_val_1d   = x_val.squeeze()
+            x_line  = np.linspace(cfg.x_range[0], cfg.x_range[1], 500)
+            y_true  = _true_fn(x_line, cfg)
+            _draw_fit(ax_before, x_train_1d, y_train, x_val_1d, y_val,
+                      x_line, y_true, _predict_1d(model_before,    x_line), "Before pruning")
+            _draw_fit(ax_pruned, x_train_1d, y_train, x_val_1d, y_val,
+                      x_line, y_true, _predict_1d(model_pruned,    x_line), "After pruning")
+            _draw_fit(ax_ft,     x_train_1d, y_train, x_val_1d, y_val,
+                      x_line, y_true, _predict_1d(model_finetuned, x_line), "After fine-tuning")
+        else:   # classification
+            _draw_classification(ax_before, x_train, y_train, x_val, y_val,
+                                 model_before,    cfg, "Before pruning")
+            _draw_classification(ax_pruned, x_train, y_train, x_val, y_val,
+                                 model_pruned,    cfg, "After pruning")
+            _draw_classification(ax_ft,     x_train, y_train, x_val, y_val,
+                                 model_finetuned, cfg, "After fine-tuning")
 
     path = os.path.join(output_dir, "pruning_summary.png")
     fig.savefig(path, dpi=150, bbox_inches="tight")

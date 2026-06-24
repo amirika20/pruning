@@ -2,7 +2,7 @@ import copy
 import numpy as np
 import torch
 import torch.nn as nn
-from model import MLP, ResNet, CNN, ResCNN
+from model import MLP, ResNet, CNN, ResCNN, ModularTransformer
 
 
 # ── layer accessors ───────────────────────────────────────────────────────────
@@ -11,10 +11,11 @@ def _get_prunable_layer(model: nn.Module, layer_idx: int) -> nn.Module:
     """
     Returns the primary weight layer whose OUTPUT channels/neurons are prunable.
 
-    MLP    → hidden Linear before its ReLU
-    ResNet → branch[0] Linear (branch intermediate dim; block output unchanged)
-    CNN    → block.conv  Conv2d (output channels = filters)
-    ResCNN → block.branch[0] Conv2d (intermediate channels; block output unchanged)
+    MLP               → hidden Linear before its ReLU
+    ResNet            → branch[0] Linear (branch intermediate dim; block output unchanged)
+    CNN               → block.conv  Conv2d (output channels = filters)
+    ResCNN            → block.branch[0] Conv2d (intermediate channels; block output unchanged)
+    ModularTransformer → FFN fc1 Linear (intermediate d_ff neurons)
     """
     if isinstance(model, MLP):
         return model.net[2 * layer_idx]
@@ -24,6 +25,8 @@ def _get_prunable_layer(model: nn.Module, layer_idx: int) -> nn.Module:
         return model.blocks[layer_idx].conv
     elif isinstance(model, ResCNN):
         return model.blocks[layer_idx].branch[0]
+    elif isinstance(model, ModularTransformer):
+        return model.layers[layer_idx].ffn.fc1
     raise ValueError(f"Unsupported model type: {type(model).__name__}")
 
 
@@ -33,7 +36,7 @@ def _get_prunable_bn(model: nn.Module, layer_idx: int):
         return model.blocks[layer_idx].bn
     if isinstance(model, ResCNN):
         return model.blocks[layer_idx].branch[1]
-    return None
+    return None  # MLP, ResNet, ModularTransformer have no paired BN
 
 
 def layer_width(model: nn.Module, layer_idx: int) -> int:
@@ -148,11 +151,13 @@ def find_silent_neurons(
         model(train_inputs)
     handle.remove()
 
-    stacked = torch.cat(captured, dim=0)   # [N, H] or [N, C, H, W]
+    stacked = torch.cat(captured, dim=0)   # [N, H], [N, T, H], or [N, C, H, W]
     if stacked.dim() == 4:
         ever_active = stacked.any(dim=0).any(dim=-1).any(dim=-1)   # [C]
+    elif stacked.dim() == 3:
+        ever_active = stacked.any(dim=0).any(dim=0)                # [H] (over N and T)
     else:
-        ever_active = stacked.any(dim=0)   # [H]
+        ever_active = stacked.any(dim=0)                           # [H]
 
     return [j for j, active in enumerate(ever_active.tolist()) if not active]
 
@@ -168,6 +173,8 @@ def prune_layer(model: nn.Module, layer_idx: int, indices_to_remove: list) -> nn
         return _prune_cnn_block(model, layer_idx, indices_to_remove)
     elif isinstance(model, ResCNN):
         return _prune_rescnn_block(model, layer_idx, indices_to_remove)
+    elif isinstance(model, ModularTransformer):
+        return _prune_transformer_ffn(model, layer_idx, indices_to_remove)
     raise ValueError(f"Unsupported model type: {type(model).__name__}")
 
 
@@ -305,4 +312,31 @@ def _prune_rescnn_block(model: ResCNN, block_idx: int, indices_to_remove: list) 
     block.branch[0] = new_conv1
     block.branch[1] = new_bn1
     block.branch[3] = new_conv2
+    return pruned
+
+
+# ── Transformer FFN pruning ───────────────────────────────────────────────────
+
+def _prune_transformer_ffn(model: ModularTransformer, layer_idx: int,
+                           indices_to_remove: list) -> ModularTransformer:
+    """Remove hidden neurons from the FFN of transformer layer `layer_idx`.
+
+    Shrinks fc1 output dim and fc2 input dim; all other weights are unchanged.
+    """
+    ffn    = model.layers[layer_idx].ffn
+    fc1, fc2 = ffn.fc1, ffn.fc2
+    device = fc1.weight.device
+    keep   = [i for i in range(fc1.out_features) if i not in set(indices_to_remove)]
+
+    new_fc1 = nn.Linear(fc1.in_features, len(keep)).to(device)
+    new_fc1.weight.data = fc1.weight.data[keep].clone()
+    new_fc1.bias.data   = fc1.bias.data[keep].clone()
+
+    new_fc2 = nn.Linear(len(keep), fc2.out_features).to(device)
+    new_fc2.weight.data = fc2.weight.data[:, keep].clone()
+    new_fc2.bias.data   = fc2.bias.data.clone()
+
+    pruned = copy.deepcopy(model)
+    pruned.layers[layer_idx].ffn.fc1 = new_fc1
+    pruned.layers[layer_idx].ffn.fc2 = new_fc2
     return pruned

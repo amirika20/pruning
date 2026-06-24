@@ -1,0 +1,127 @@
+14:17:57  ============================================================
+14:17:57  Experiment: mnist_pixel_cnn
+14:17:57  ============================================================
+14:17:57  Model      : CNN  (94,186 params)
+14:17:57  Task       : multiclass  (10 classes)
+14:17:57  Data       : mnist  (train=1600, val=400)
+14:17:57  === Training ===
+14:17:59  Epoch   10 | train 0.855205 | val 0.832022 | acc 0.8650
+14:18:00  Epoch   20 | train 0.368745 | val 1.036789 | acc 0.6300
+14:18:01  Epoch   30 | train 0.237947 | val 0.657680 | acc 0.7750
+14:18:02  Epoch   40 | train 0.134999 | val 0.448766 | acc 0.8575
+14:18:03  Epoch   50 | train 0.108071 | val 0.870614 | acc 0.7150
+14:18:04  Epoch   60 | train 0.081563 | val 0.849873 | acc 0.7100
+14:18:05  Epoch   70 | train 0.074426 | val 0.340414 | acc 0.8900
+14:18:06  Epoch   80 | train 0.046484 | val 0.329368 | acc 0.9050
+14:18:08  Epoch   90 | train 0.039397 | val 1.038640 | acc 0.7200
+14:18:09  Epoch  100 | train 0.038996 | val 0.430337 | acc 0.8675
+14:18:10  Epoch  110 | train 0.017454 | val 0.623869 | acc 0.8050
+14:18:11  Epoch  120 | train 0.014796 | val 0.564815 | acc 0.8200
+14:18:12  Epoch  130 | train 0.020318 | val 1.253058 | acc 0.6950
+14:18:13  Epoch  140 | train 0.010286 | val 0.310347 | acc 0.9075
+14:18:14  Epoch  150 | train 0.015550 | val 0.263287 | acc 0.9250
+14:18:15  Epoch  160 | train 0.009582 | val 0.612233 | acc 0.8450
+14:18:16  Epoch  170 | train 0.006464 | val 0.137411 | acc 0.9575
+14:18:17  Epoch  180 | train 0.007169 | val 2.145957 | acc 0.5300
+14:18:18  Epoch  190 | train 0.072003 | val 3.963020 | acc 0.4025
+14:18:19  Epoch  200 | train 0.005698 | val 0.159021 | acc 0.9500
+14:18:20  Epoch  210 | train 0.004605 | val 0.327548 | acc 0.9125
+14:18:21  Epoch  220 | train 0.005970 | val 0.283795 | acc 0.9075
+14:18:22  Epoch  230 | train 0.007778 | val 0.688205 | acc 0.8075
+14:18:24  Epoch  240 | train 0.003153 | val 0.199981 | acc 0.9350
+14:18:25  Epoch  250 | train 0.003234 | val 0.335055 | acc 0.8925
+14:18:26  Epoch  260 | train 0.096336 | val 0.534495 | acc 0.8275
+14:18:27  Epoch  270 | train 0.006307 | val 0.175810 | acc 0.9425
+14:18:28  Epoch  280 | train 0.004051 | val 0.146751 | acc 0.9575
+14:18:29  Epoch  290 | train 0.004946 | val 0.350374 | acc 0.8875
+14:18:30  Epoch  300 | train 0.012899 | val 0.870862 | acc 0.7675
+14:18:31  Epoch  310 | train 0.003335 | val 0.163716 | acc 0.9550
+14:18:33  Epoch  320 | train 0.002628 | val 0.219779 | acc 0.9300
+14:18:34  Epoch  330 | train 0.003946 | val 0.651215 | acc 0.8000
+14:18:35  Epoch  340 | train 0.050716 | val 2.415470 | acc 0.4600
+14:18:36  Epoch  350 | train 0.003717 | val 0.138521 | acc 0.9650
+14:18:37  Epoch  360 | train 0.003624 | val 0.255546 | acc 0.9175
+14:18:38  Epoch  370 | train 0.003032 | val 0.519796 | acc 0.8450
+14:18:39  Epoch  380 | train 0.003056 | val 0.158602 | acc 0.9525
+14:18:41  Epoch  390 | train 0.003397 | val 0.206725 | acc 0.9375
+14:18:42  Epoch  400 | train 0.032280 | val 1.567605 | acc 0.6200
+14:18:43  Epoch  410 | train 0.004914 | val 0.343260 | acc 0.8900
+14:18:44  Epoch  420 | train 0.002707 | val 0.139909 | acc 0.9525
+14:18:45  Epoch  430 | train 0.003287 | val 0.514119 | acc 0.8550
+14:18:46  Epoch  440 | train 0.003333 | val 0.658410 | acc 0.8075
+14:18:47  Epoch  450 | train 0.005669 | val 0.383388 | acc 0.8775
+14:18:49  Epoch  460 | train 0.103703 | val 2.950467 | acc 0.4725
+14:18:50  Epoch  470 | train 0.003869 | val 0.159404 | acc 0.9475
+14:18:51  Epoch  480 | train 0.002951 | val 0.185089 | acc 0.9375
+14:18:53  Epoch  490 | train 0.002463 | val 0.175186 | acc 0.9475
+14:18:54  Epoch  500 | train 0.002867 | val 0.317144 | acc 0.9075
+14:18:54  Final val accuracy: 0.9075
+14:18:54  === Pruning ===
+14:18:55    Layer 0: silent=0  redundant=0  | removed=0  remaining=32
+14:18:55    Layer 1: silent=0  redundant=0  | removed=0  remaining=64
+14:18:55    Layer 2: silent=0  redundant=14  | removed=14  remaining=114
+14:18:55    Total removed: 14
+14:18:55  === Efficiency: original vs pruned ===
+14:18:55    Parameters :   94,186  →    85,954   (8.7% reduction)
+14:18:55    Model size :   367.91 KB  →    335.76 KB
+14:18:55    FLOPs      : 11,835,904  →  10,803,432   (8.7% reduction)
+14:18:55    Infer time :    90.43 µs  →     85.29 µs   (5.7% faster)
+14:18:55  === Fine-tuning ===
+14:18:57  Epoch   10 | train 0.005310 | val 0.135039 | acc 0.9550
+14:18:58  Epoch   20 | train 0.004171 | val 0.156680 | acc 0.9550
+14:18:59  Epoch   30 | train 0.004310 | val 0.136262 | acc 0.9500
+14:19:00  Epoch   40 | train 0.004042 | val 0.153702 | acc 0.9475
+14:19:01  Epoch   50 | train 0.003935 | val 0.155250 | acc 0.9550
+14:19:03  Epoch   60 | train 0.003715 | val 0.197335 | acc 0.9400
+14:19:04  Epoch   70 | train 0.003534 | val 0.155836 | acc 0.9500
+14:19:05  Epoch   80 | train 0.003277 | val 0.164631 | acc 0.9375
+14:19:06  Epoch   90 | train 0.003110 | val 0.147955 | acc 0.9450
+14:19:07  Epoch  100 | train 0.002954 | val 0.156790 | acc 0.9400
+14:19:09  Epoch  110 | train 0.003187 | val 0.215871 | acc 0.9275
+14:19:10  Epoch  120 | train 0.003078 | val 0.215807 | acc 0.9350
+14:19:11  Epoch  130 | train 0.003368 | val 0.153453 | acc 0.9475
+14:19:12  Epoch  140 | train 0.002976 | val 0.146807 | acc 0.9450
+14:19:13  Epoch  150 | train 0.003091 | val 0.137677 | acc 0.9625
+14:19:14  Epoch  160 | train 0.003595 | val 0.264605 | acc 0.9100
+14:19:16  Epoch  170 | train 0.003288 | val 0.130993 | acc 0.9575
+14:19:17  Epoch  180 | train 0.003039 | val 0.151777 | acc 0.9525
+14:19:18  Epoch  190 | train 0.003647 | val 0.148406 | acc 0.9550
+14:19:19  Epoch  200 | train 0.002969 | val 0.143108 | acc 0.9550
+14:19:20  Epoch  210 | train 0.003065 | val 0.176823 | acc 0.9450
+14:19:21  Epoch  220 | train 0.002958 | val 0.139939 | acc 0.9625
+14:19:22  Epoch  230 | train 0.003329 | val 0.536995 | acc 0.8275
+14:19:23  Epoch  240 | train 0.002960 | val 0.153448 | acc 0.9500
+14:19:25  Epoch  250 | train 0.003096 | val 0.139255 | acc 0.9575
+14:19:26  Epoch  260 | train 0.003087 | val 0.162439 | acc 0.9525
+14:19:27  Epoch  270 | train 0.003209 | val 0.213406 | acc 0.9300
+14:19:28  Epoch  280 | train 0.004005 | val 0.181269 | acc 0.9275
+14:19:29  Epoch  290 | train 0.003016 | val 0.146867 | acc 0.9500
+14:19:31  Epoch  300 | train 0.003102 | val 0.194907 | acc 0.9425
+14:19:32  Epoch  310 | train 0.003208 | val 0.155785 | acc 0.9500
+14:19:33  Epoch  320 | train 0.003052 | val 0.161115 | acc 0.9450
+14:19:35  Epoch  330 | train 0.003146 | val 0.288046 | acc 0.9000
+14:19:36  Epoch  340 | train 0.003338 | val 0.181416 | acc 0.9475
+14:19:37  Epoch  350 | train 0.003177 | val 0.157928 | acc 0.9475
+14:19:38  Epoch  360 | train 0.002898 | val 0.174116 | acc 0.9375
+14:19:39  Epoch  370 | train 0.002952 | val 0.185404 | acc 0.9375
+14:19:41  Epoch  380 | train 0.003431 | val 0.162263 | acc 0.9450
+14:19:42  Epoch  390 | train 0.002981 | val 0.174816 | acc 0.9500
+14:19:43  Epoch  400 | train 0.003149 | val 0.219445 | acc 0.9250
+14:19:44  Epoch  410 | train 0.003041 | val 0.204047 | acc 0.9275
+14:19:46  Epoch  420 | train 0.003139 | val 0.243726 | acc 0.9200
+14:19:47  Epoch  430 | train 0.003618 | val 0.168159 | acc 0.9500
+14:19:48  Epoch  440 | train 0.002982 | val 0.176678 | acc 0.9475
+14:19:49  Epoch  450 | train 0.003129 | val 0.240711 | acc 0.9125
+14:19:50  Epoch  460 | train 0.002977 | val 0.180406 | acc 0.9425
+14:19:51  Epoch  470 | train 0.002940 | val 0.162499 | acc 0.9600
+14:19:52  Epoch  480 | train 0.002863 | val 0.250305 | acc 0.9225
+14:19:54  Epoch  490 | train 0.003339 | val 0.246449 | acc 0.9075
+14:19:55  Epoch  500 | train 0.003226 | val 0.163662 | acc 0.9550
+14:19:55  Final val accuracy (finetuned): 0.9550
+14:19:55  === Efficiency: original vs fine-tuned ===
+14:19:55    Parameters :   94,186  →    85,954   (8.7% reduction)
+14:19:55    Model size :   367.91 KB  →    335.76 KB
+14:19:55    FLOPs      : 11,835,904  →  10,803,432   (8.7% reduction)
+14:19:55    Infer time :    90.91 µs  →     82.14 µs   (9.6% faster)
+14:19:55  Saved results to /home/amirabbas-kazeminia/Projects/pruning/outputs/mnist_pixel_cnn/ccf81b13/75aac574/739126fc/results.json
+14:19:55  Saved pruning summary to /home/amirabbas-kazeminia/Projects/pruning/outputs/mnist_pixel_cnn/ccf81b13/75aac574/739126fc/pruning_summary.png

@@ -5,28 +5,32 @@ import torch
 from torch.utils.data import TensorDataset, DataLoader
 from config import DataConfig
 
-_2D_FUNCTIONS    = {"square", "circle", "bullseye"}
-_MNIST_FUNCTIONS = {"mnist"}
+_2D_FUNCTIONS      = {"square", "circle", "bullseye"}
+_MNIST_FUNCTIONS   = {"mnist", "mnist_flat"}   # mnist=pixel [N,1,28,28], mnist_flat=vector [N,784]
+_MODULAR_FUNCTIONS = {"modular_add"}
 
 
 def get_input_dim(cfg: DataConfig) -> int:
     if cfg.function in _2D_FUNCTIONS: return 2
-    return 1   # 1D functions and MNIST (channel dim handled by model)
+    if cfg.function == "mnist_flat":  return 784
+    return 1   # 1D functions; pixel-space MNIST channel dim is handled by the CNN model
 
 
-def get_task(cfg: DataConfig) -> str:
-    if cfg.function in _MNIST_FUNCTIONS: return "multiclass"
-    if cfg.function in _2D_FUNCTIONS:    return "classification"
+def get_task(cfg) -> str:
+    if cfg.function in _MNIST_FUNCTIONS:   return "multiclass"
+    if cfg.function in _MODULAR_FUNCTIONS: return "multiclass"
+    if cfg.function in _2D_FUNCTIONS:      return "classification"
     return "regression"
 
 
-def get_n_classes(cfg: DataConfig) -> int:
-    if cfg.function == "mnist": return 10
+def get_n_classes(cfg) -> int:
+    if cfg.function in _MNIST_FUNCTIONS:   return 10
+    if cfg.function in _MODULAR_FUNCTIONS: return cfg.p
     return 1
 
 
-def is_image_data(cfg: DataConfig) -> bool:
-    return cfg.function in _MNIST_FUNCTIONS
+def is_image_data(cfg) -> bool:
+    return cfg.function == "mnist"   # only pixel-space; mnist_flat is a flat vector
 
 
 def classify_points(pts: np.ndarray, cfg: DataConfig) -> np.ndarray:
@@ -80,6 +84,10 @@ def _load_mnist(cfg: DataConfig) -> tuple[TensorDataset, TensorDataset]:
     x_val = torch.stack([full_test[int(i)][0] for i in val_idx])
     y_val = torch.tensor([full_test[int(i)][1] for i in val_idx], dtype=torch.long)
 
+    if cfg.function == "mnist_flat":
+        x_train = x_train.view(len(x_train), -1)   # [N, 784]
+        x_val   = x_val.view(len(x_val),   -1)
+
     return TensorDataset(x_train, y_train), TensorDataset(x_val, y_val)
 
 
@@ -125,6 +133,33 @@ def generate_data(cfg: DataConfig):
 
 def make_loaders(cfg: DataConfig, batch_size: int = None):
     train_ds, val_ds = generate_data(cfg)
+    bs = batch_size if batch_size is not None else len(train_ds)
+    train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True)
+    val_loader   = DataLoader(val_ds,   batch_size=len(val_ds), shuffle=False)
+    return train_loader, val_loader, train_ds, val_ds
+
+
+def make_modular_loaders(cfg, batch_size: int = None):
+    """All p² pairs (a, b) for (a+b) mod p.
+
+    Input tokens: [a, op, b, =]  where op=p and eq=p+1  (vocab size = p+2).
+    Labels: (a+b) % p  as long integers in [0, p).
+    """
+    p = cfg.p
+    rng = torch.Generator().manual_seed(cfg.seed)
+
+    a_vals = torch.arange(p, dtype=torch.long).repeat_interleave(p)  # [p²]
+    b_vals = torch.arange(p, dtype=torch.long).repeat(p)             # [p²]
+    op_tok = torch.full((p * p,), p,     dtype=torch.long)           # "+" token
+    eq_tok = torch.full((p * p,), p + 1, dtype=torch.long)           # "=" token
+    X = torch.stack([a_vals, op_tok, b_vals, eq_tok], dim=1)         # [p², 4]
+    Y = (a_vals + b_vals) % p                                         # [p²]
+
+    idx     = torch.randperm(p * p, generator=rng)
+    n_train = int(p * p * cfg.train_ratio)
+    train_ds = TensorDataset(X[idx[:n_train]], Y[idx[:n_train]])
+    val_ds   = TensorDataset(X[idx[n_train:]], Y[idx[n_train:]])
+
     bs = batch_size if batch_size is not None else len(train_ds)
     train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True)
     val_loader   = DataLoader(val_ds,   batch_size=len(val_ds), shuffle=False)

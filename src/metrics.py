@@ -11,6 +11,8 @@ def count_parameters(model: nn.Module) -> int:
 
 def _make_dummy_input(model: nn.Module, device: torch.device) -> torch.Tensor:
     """Create a single-sample dummy input that matches the model's first layer."""
+    if hasattr(model, "make_dummy_input"):
+        return model.make_dummy_input(device)
     for m in model.modules():
         if isinstance(m, nn.Conv2d):
             return torch.zeros(1, m.in_channels, 8, 8, device=device)

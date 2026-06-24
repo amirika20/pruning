@@ -3,7 +3,7 @@ import torch.nn as nn
 from typing import List, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from config import ModelConfig
+    from config import ModelConfig, TransformerModelConfig
 
 
 class MLP(nn.Module):
@@ -157,3 +157,76 @@ def build_model(cfg: "ModelConfig", input_dim: int = 1, output_dim: int = 1) -> 
         return ResCNN(cfg.hidden_sizes, cfg.input_channels, output_dim)
     else:
         raise ValueError(f"Unknown arch: {cfg.arch!r}. Choose from: mlp, resnet, cnn, rescnn")
+
+
+# ── Transformer for modular arithmetic ───────────────────────────────────────
+
+class TransformerFFN(nn.Module):
+    """Two-layer feed-forward network inside a transformer block (fc1 → ReLU → fc2)."""
+    def __init__(self, d_model: int, d_ff: int):
+        super().__init__()
+        self.fc1 = nn.Linear(d_model, d_ff)
+        self.act = nn.ReLU()
+        self.fc2 = nn.Linear(d_ff, d_model)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.fc2(self.act(self.fc1(x)))
+
+
+class TransformerEncoderLayer(nn.Module):
+    def __init__(self, d_model: int, n_heads: int, d_ff: int):
+        super().__init__()
+        self.attn  = nn.MultiheadAttention(d_model, n_heads, batch_first=True)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.ffn   = TransformerFFN(d_model, d_ff)
+        self.norm2 = nn.LayerNorm(d_model)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        attn_out, _ = self.attn(x, x, x)
+        x = self.norm1(x + attn_out)
+        x = self.norm2(x + self.ffn(x))
+        return x
+
+
+class ModularTransformer(nn.Module):
+    """Light transformer for modular arithmetic.
+
+    Input : [B, seq_len] int64 tokens
+    Output: [B, n_classes] logits classified from the last token position.
+    Vocabulary: {0..p-1} ∪ {op=p, eq=p+1}  →  vocab_size = p+2.
+    """
+    def __init__(self, vocab_size: int, d_model: int, n_heads: int, d_ff: int,
+                 n_layers: int, n_classes: int, seq_len: int):
+        super().__init__()
+        self.tok_embed = nn.Embedding(vocab_size, d_model)
+        self.pos_embed = nn.Embedding(seq_len, d_model)
+        self.layers = nn.ModuleList([
+            TransformerEncoderLayer(d_model, n_heads, d_ff)
+            for _ in range(n_layers)
+        ])
+        self.head = nn.Linear(d_model, n_classes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T = x.shape
+        pos = torch.arange(T, device=x.device).unsqueeze(0)
+        h = self.tok_embed(x) + self.pos_embed(pos)
+        for layer in self.layers:
+            h = layer(h)
+        return self.head(h[:, -1, :])   # classify from last ("=") token
+
+    def make_dummy_input(self, device: torch.device) -> torch.Tensor:
+        seq_len = self.pos_embed.num_embeddings
+        return torch.zeros(1, seq_len, dtype=torch.long, device=device)
+
+
+def build_transformer(cfg: "TransformerModelConfig", vocab_size: int,
+                      n_classes: int, seq_len: int) -> ModularTransformer:
+    return ModularTransformer(
+        vocab_size=vocab_size,
+        d_model=cfg.d_model,
+        n_heads=cfg.n_heads,
+        d_ff=cfg.d_ff,
+        n_layers=cfg.n_layers,
+        n_classes=n_classes,
+        seq_len=seq_len,
+    )

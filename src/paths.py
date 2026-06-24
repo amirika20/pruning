@@ -48,12 +48,22 @@ def build_experiment_dirs(cfg) -> tuple[Path, Path, bool]:
 
 
 def setup_logging(log_dir: Path) -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s  %(message)s",
-        datefmt="%H:%M:%S",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler(log_dir / "run.log"),
-        ],
-    )
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    fmt = logging.Formatter("%(asctime)s  %(message)s", datefmt="%H:%M:%S")
+
+    # Console handler: add once
+    if not any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
+               for h in root.handlers):
+        sh = logging.StreamHandler()
+        sh.setFormatter(fmt)
+        root.addHandler(sh)
+
+    # File handler: swap per experiment so each run gets its own log
+    for h in list(root.handlers):
+        if isinstance(h, logging.FileHandler):
+            h.close()
+            root.removeHandler(h)
+    fh = logging.FileHandler(log_dir / "run.log")
+    fh.setFormatter(fmt)
+    root.addHandler(fh)
