@@ -20,7 +20,11 @@ outputs/<dataset>/<name>_<YYYYMMDD_HHMMSS>/
     config.yaml               exact config that produced the run
     metadata.json             git commit, timestamp, torch/device info
     run.log                   full log
-    seeds/seed_<s>/           per-seed results.json + pruning_summary.png
+    report.txt                human-readable summary: pruning per layer, params/
+                              FLOPs/inference time before-after, val+test accuracy
+                              at every stage (trained/pruned/fine-tuned) and the
+                              deltas; mean +- std across seeds
+    seeds/seed_<s>/           per-seed results.json + report.txt + pruning_summary.png
     aggregated/results.json   mean ± std across seeds
     plots/curves.png          aggregate loss/accuracy curves
 ```
@@ -34,6 +38,10 @@ notes: "free-form description"
 data:
   kind: mnist                 # registered in src/data/ (mnist, fashion_mnist, sine, shape2d, modular_add)
   params: {flatten: true, n_samples: 2000, train_ratio: 0.8}
+  # vision datasets: n_samples come from the official train split (cut into
+  # train/val by train_ratio); the test set is the official test split
+  # (n_test to subsample it). Synthetic/modular builders provide their own
+  # held-out test splits.
 
 model:
   kind: mlp                   # registered in src/models/ (mlp, resmlp, cnn, rescnn, transformer)

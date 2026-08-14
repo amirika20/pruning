@@ -27,8 +27,13 @@ def _build_vision_bundle(
     flatten: bool,
     n_samples: int,
     train_ratio: float,
+    n_test: int | None,
     root: str,
 ) -> DatasetBundle:
+    """`n_samples` examples are drawn from the official TRAIN split and cut
+    into train/val by `train_ratio`; the test set is `n_test` examples (all
+    10k by default) from the official TEST split -- so val is genuinely
+    disjoint from test and never comes from the test data."""
     from torchvision import transforms
 
     tfm = transforms.Compose([
@@ -41,21 +46,21 @@ def _build_vision_bundle(
 
     rng = torch.Generator().manual_seed(data_seed)
     n_train = int(n_samples * train_ratio)
-    n_val = n_samples - n_train
-    train_idx = torch.randperm(len(full_train), generator=rng)[:n_train]
-    val_idx = torch.randperm(len(full_test), generator=rng)[:n_val]
+    trainval_idx = torch.randperm(len(full_train), generator=rng)[:n_samples]
+    test_idx = torch.randperm(len(full_test), generator=rng)[: (n_test if n_test is not None else len(full_test))]
 
-    x_train, y_train = _subset_as_tensors(full_train, train_idx)
-    x_val, y_val = _subset_as_tensors(full_test, val_idx)
+    x_trainval, y_trainval = _subset_as_tensors(full_train, trainval_idx)
+    x_test, y_test = _subset_as_tensors(full_test, test_idx)
 
     if flatten:
-        x_train = x_train.view(len(x_train), -1)  # [N, 784]
-        x_val = x_val.view(len(x_val), -1)
+        x_trainval = x_trainval.view(len(x_trainval), -1)  # [N, 784]
+        x_test = x_test.view(len(x_test), -1)
 
     return DatasetBundle(
-        train_ds=TensorDataset(x_train, y_train),
-        val_ds=TensorDataset(x_val, y_val),
-        input_shape=tuple(x_train.shape[1:]),
+        train_ds=TensorDataset(x_trainval[:n_train], y_trainval[:n_train]),
+        val_ds=TensorDataset(x_trainval[n_train:], y_trainval[n_train:]),
+        test_ds=TensorDataset(x_test, y_test),
+        input_shape=tuple(x_trainval.shape[1:]),
         output_dim=10,
         task="multiclass",
     )
@@ -67,13 +72,14 @@ def mnist(
     flatten: bool = True,
     n_samples: int = 2000,
     train_ratio: float = 0.8,
+    n_test: int | None = None,  # None = the full official test split
     root: str = "~/.cache/mnist",
 ) -> DatasetBundle:
     from torchvision import datasets
 
     return _build_vision_bundle(
         datasets.MNIST, ((0.1307,), (0.3081,)),
-        data_seed, flatten, n_samples, train_ratio, root,
+        data_seed, flatten, n_samples, train_ratio, n_test, root,
     )
 
 
@@ -83,11 +89,12 @@ def fashion_mnist(
     flatten: bool = True,
     n_samples: int = 2000,
     train_ratio: float = 0.8,
+    n_test: int | None = None,  # None = the full official test split
     root: str = "~/.cache/mnist",
 ) -> DatasetBundle:
     from torchvision import datasets
 
     return _build_vision_bundle(
         datasets.FashionMNIST, ((0.2860,), (0.3530,)),
-        data_seed, flatten, n_samples, train_ratio, root,
+        data_seed, flatten, n_samples, train_ratio, n_test, root,
     )

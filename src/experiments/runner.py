@@ -29,6 +29,7 @@ import torch
 
 from src.analysis.metrics import print_efficiency_report
 from src.analysis.plots import plot_aggregate_curves, plot_pruning_summary
+from src.analysis.report import format_report
 from src.config import ExperimentConfig
 from src.data import build_dataset
 from src.experiments.aggregate import aggregate_seed_results
@@ -108,13 +109,23 @@ def run_single_seed(config: ExperimentConfig, seed: int, device: torch.device, d
 
     bundle = build_dataset(config.data.kind, data_seed=seed, **config.data.params)
     train_loader, val_loader = bundle.loaders(config.training.batch_size)
+    test_loader = bundle.test_loader()
     model = build_model(config.model.kind, bundle, **config.model.params).to(device)
+
+    def eval_stage(m) -> dict:
+        """val (+ test when the dataset provides one) loss/accuracy of `m`."""
+        val_loss, val_acc = evaluate(m, val_loader, bundle.task)
+        stage = {"val_loss": val_loss, "val_acc": val_acc}
+        if test_loader is not None:
+            stage["test_loss"], stage["test_acc"] = evaluate(m, test_loader, bundle.task)
+        return stage
 
     n_params = sum(p.numel() for p in model.parameters())
     logging.info(f"Model      : {config.model.kind}  ({n_params:,} params)")
     logging.info(f"Task       : {bundle.task}  ({bundle.output_dim} output dim)")
     logging.info(f"Data       : {config.data.kind}  "
-                 f"(train={len(bundle.train_ds)}, val={len(bundle.val_ds)})")
+                 f"(train={len(bundle.train_ds)}, val={len(bundle.val_ds)}, "
+                 f"test={len(bundle.test_ds) if bundle.test_ds is not None else 0})")
 
     # --- Train ---
     logging.info("=== Training ===")
@@ -125,11 +136,13 @@ def run_single_seed(config: ExperimentConfig, seed: int, device: torch.device, d
     if val_accs:
         logging.info(f"Final val accuracy: {val_accs[-1]:.4f}")
     model_before = copy.deepcopy(model)
+    stage_trained = eval_stage(model_before)
 
     # --- Prune ---
     logging.info("=== Pruning ===")
     model_pruned, pruning_per_layer = prune_model(model, config.pruning, bundle, device)
-    pruned_val_loss, pruned_val_acc = evaluate(model_pruned, val_loader, bundle.task)
+    stage_pruned = eval_stage(model_pruned)
+    pruned_val_loss, pruned_val_acc = stage_pruned["val_loss"], stage_pruned["val_acc"]
     msg = f"Val loss after pruning (no retraining): {pruned_val_loss:.4f}"
     if pruned_val_acc is not None:
         msg += f" | val accuracy: {pruned_val_acc:.4f}"
@@ -144,6 +157,7 @@ def run_single_seed(config: ExperimentConfig, seed: int, device: torch.device, d
         model_finetuned = model_pruned
         ft_train_losses, ft_val_losses, ft_train_accs, ft_val_accs = [], [], [], []
         metrics_finetuned = None
+        stage_finetuned = None
     else:
         logging.info("=== Fine-tuning ===")
         model_finetuned = copy.deepcopy(model_pruned)
@@ -154,6 +168,14 @@ def run_single_seed(config: ExperimentConfig, seed: int, device: torch.device, d
         if ft_val_accs:
             logging.info(f"Final val accuracy (finetuned): {ft_val_accs[-1]:.4f}")
         metrics_finetuned = print_efficiency_report(model_before, model_finetuned, label="fine-tuned")
+        stage_finetuned = eval_stage(model_finetuned)
+
+    if "test_loss" in stage_trained:
+        end = stage_finetuned or stage_pruned
+        msg = f"Test loss: {end['test_loss']:.4f}"
+        if end["test_acc"] is not None:
+            msg += f" | test accuracy: {end['test_acc']:.4f}"
+        logging.info(msg)
 
     is_multiclass = bundle.task == "multiclass"
     result = {
@@ -180,6 +202,12 @@ def run_single_seed(config: ExperimentConfig, seed: int, device: torch.device, d
                 "ft_val_loss": ft_val_losses[-1],
                 **({"ft_val_acc": ft_val_accs[-1]} if is_multiclass else {}),
             }),
+        },
+        # val (+ test) of each model stage -- the basis of report.txt.
+        "stages": {
+            "trained": stage_trained,
+            "pruned": stage_pruned,
+            "finetuned": stage_finetuned,
         },
         "pruning_per_layer": pruning_per_layer,
         "pruned": metrics_pruned,
@@ -218,6 +246,7 @@ def run_experiment(config: ExperimentConfig) -> Path:
         # cosmetic code being exception-free.
         s_dir = exp_dir / "seeds" / f"seed_{seed}"
         save_json(result, s_dir / "results.json")
+        (s_dir / "report.txt").write_text(format_report(config, [result], title_suffix=f" (seed {seed})"))
 
         plot_pruning_summary(
             models["before"], models["pruned"], models["finetuned"],
@@ -229,6 +258,10 @@ def run_experiment(config: ExperimentConfig) -> Path:
     aggregated = aggregate_seed_results(seed_results)
     aggregated["name"] = config.name
     save_json(aggregated, exp_dir / "aggregated" / "results.json")
+
+    report = format_report(config, seed_results)
+    (exp_dir / "report.txt").write_text(report)
+    logging.info("\n" + report)
 
     plot_aggregate_curves(
         [r["history"] for r in seed_results],

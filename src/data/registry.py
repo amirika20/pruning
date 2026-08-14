@@ -36,6 +36,10 @@ class DatasetBundle:
     input_shape: tuple[int, ...]  # per-sample shape, e.g. (784,), (1, 28, 28), (4,)
     output_dim: int
     task: str
+    # Held-out test split, never touched during training or model selection.
+    # None only for custom builders that don't provide one -- the runner then
+    # skips test evaluation (and the report's test columns).
+    test_ds: TensorDataset | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -49,6 +53,11 @@ class DatasetBundle:
         train_loader = DataLoader(self.train_ds, batch_size=bs, shuffle=True)
         val_loader = DataLoader(self.val_ds, batch_size=len(self.val_ds), shuffle=False)
         return train_loader, val_loader
+
+    def test_loader(self, batch_size: int = 1024) -> DataLoader | None:
+        if self.test_ds is None:
+            return None
+        return DataLoader(self.test_ds, batch_size=batch_size, shuffle=False)
 
 
 def register_dataset(name: str) -> Callable[[Callable[..., DatasetBundle]], Callable[..., DatasetBundle]]:

@@ -11,8 +11,8 @@ data:
   kind: mnist
   params:
     flatten: true
-    n_samples: 70000          # 60000 train (full train set) + 10000 val (full test set)
-    train_ratio: 0.857142857142857
+    n_samples: 60000          # the full official train split: 54k train + 6k val
+    train_ratio: 0.9          # test = the full official 10k test split
 
 model:
   kind: mlp

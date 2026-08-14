@@ -67,9 +67,20 @@ def sine(
     y_t = torch.tensor(y, dtype=torch.float32).unsqueeze(1)
     train_ds, val_ds = _split(x_t, y_t, train_ratio)
 
+    # Held-out test set: an independent draw from the same distribution,
+    # sized like the val split.
+    n_test = max(1, n_samples - int(n_samples * train_ratio))
+    x_test = rng.uniform(x_range[0], x_range[1], n_test)
+    y_test = true_fn(x_test) + rng.normal(0, noise_std, size=x_test.shape)
+    test_ds = TensorDataset(
+        torch.tensor(x_test, dtype=torch.float32).unsqueeze(1),
+        torch.tensor(y_test, dtype=torch.float32).unsqueeze(1),
+    )
+
     return DatasetBundle(
         train_ds=train_ds,
         val_ds=val_ds,
+        test_ds=test_ds,
         input_shape=(1,),
         output_dim=1,
         task="regression",
@@ -99,9 +110,25 @@ def shape2d(
     y_t = torch.tensor(y, dtype=torch.float32).unsqueeze(1)
     train_ds, val_ds = _split(x_t, y_t, train_ratio)
 
+    # Held-out test set: an independent draw (same distribution, same
+    # label-flip noise), sized like the val split.
+    n_test = max(1, n_samples - int(n_samples * train_ratio))
+    xt1 = rng.uniform(x_range[0], x_range[1], n_test)
+    xt2 = rng.uniform(x_range[0], x_range[1], n_test)
+    x_test = np.stack([xt1, xt2], axis=1)
+    y_test = classify_points(x_test, shape, x_range)
+    if noise_std > 0:
+        flip = rng.random(n_test) < noise_std
+        y_test = np.where(flip, -y_test, y_test)
+    test_ds = TensorDataset(
+        torch.tensor(x_test, dtype=torch.float32),
+        torch.tensor(y_test, dtype=torch.float32).unsqueeze(1),
+    )
+
     return DatasetBundle(
         train_ds=train_ds,
         val_ds=val_ds,
+        test_ds=test_ds,
         input_shape=(2,),
         output_dim=1,
         task="classification",

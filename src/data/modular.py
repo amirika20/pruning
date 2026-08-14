@@ -27,10 +27,13 @@ def modular_add(
 
     idx = torch.randperm(p * p, generator=rng)
     n_train = int(p * p * train_ratio)
+    # The held-out pairs are split evenly into val and test.
+    n_val = (p * p - n_train) // 2
 
     return DatasetBundle(
         train_ds=TensorDataset(X[idx[:n_train]], Y[idx[:n_train]]),
-        val_ds=TensorDataset(X[idx[n_train:]], Y[idx[n_train:]]),
+        val_ds=TensorDataset(X[idx[n_train : n_train + n_val]], Y[idx[n_train : n_train + n_val]]),
+        test_ds=TensorDataset(X[idx[n_train + n_val :]], Y[idx[n_train + n_val :]]),
         input_shape=(4,),
         output_dim=p,
         task="multiclass",

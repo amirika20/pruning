@@ -3,8 +3,9 @@ notes: "Srinivas & Babu, 'Data-free Parameter Pruning for Deep Neural Networks' 
   Sec 5.2 protocol, as close as this repo allows: their LeNet keeps 99% of its weights in a
   single 500-neuron FC layer, which is the only layer they prune -- here that becomes an MLP
   with one 500-unit hidden layer on flattened MNIST (our conv models have BatchNorm between
-  filter and consumer, so exact merge surgery doesn't apply). Full 60k/10k MNIST train/test
-  split, Caffe LeNet solver hyperparameters (SGD, lr 0.01, momentum 0.9, weight decay 5e-4),
+  filter and consumer, so exact merge surgery doesn't apply). 54k/6k train/val from the
+  official train split, full official 10k test set,
+  Caffe LeNet solver hyperparameters (SGD, lr 0.01, momentum 0.9, weight decay 5e-4),
   pruning via saliency-ranked pairwise merging with the paper's data-free histogram-mode
   cutoff, and NO fine-tuning -- all reported numbers are straight after prune + surgery,
   exactly as in the paper."
@@ -13,8 +14,8 @@ data:
   kind: mnist
   params:
     flatten: true
-    n_samples: 70000          # 60000 train (full train set) + 10000 val (full test set)
-    train_ratio: 0.857142857142857
+    n_samples: 60000          # the full official train split: 54k train + 6k val
+    train_ratio: 0.9          # test = the full official 10k test split
 
 model:
   kind: mlp
