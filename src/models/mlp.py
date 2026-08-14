@@ -33,6 +33,9 @@ class MLP(PrunableModel):
     def prunable_layer(self, idx: int) -> nn.Module:
         return self.net[2 * idx]
 
+    def outgoing_module(self, idx: int) -> nn.Module:
+        return self.net[2 * (idx + 1)]
+
     def outgoing_weights(self, idx: int) -> torch.Tensor:
         return self.net[2 * (idx + 1)].weight.data.t()  # [H, out]
 

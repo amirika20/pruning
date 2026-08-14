@@ -1,0 +1,43 @@
+name: mnist_flat_mlp_osscar
+notes: "OSSCAR (Meng et al., ICML 2024) one-shot structured pruning on the same 500-unit
+  MLP / full-MNIST setup as mnist_flat_mlp_datafree, for a direct method comparison.
+  Layer-wise reconstruction on calibration activations: greedy OBS-style elimination
+  (fastprune) + swap local search, then an exact least-squares re-solve of the surviving
+  consumer weights. One-shot as in the paper: NO fine-tuning -- all reported numbers are
+  straight after prune + weight update. prune_fraction 0.5 removes 250 of 500 neurons
+  (OSSCAR is budgeted; it has no automatic cutoff)."
+
+data:
+  kind: mnist
+  params:
+    flatten: true
+    n_samples: 70000          # 60000 train (full train set) + 10000 val (full test set)
+    train_ratio: 0.857142857142857
+
+model:
+  kind: mlp
+  params:
+    hidden_sizes: [500]
+
+training:
+  optimizer: sgd
+  epochs: 30
+  lr: 0.01
+  momentum: 0.9
+  batch_size: 64
+  weight_decay: 5.0e-4
+  log_every: 5
+
+pruning:
+  methods:
+    - kind: osscar
+      params:
+        prune_fraction: 0.5   # remove 250 of 500 neurons
+        # lambda2: 1.0e-2     # ridge damping (official default)
+        # update_iter: 1      # neurons per greedy step (official default)
+        # local_search: true  # swap refinement after the greedy stage
+
+finetune:
+  epochs: 0                   # one-shot: the reconstruction update is the whole recovery
+
+seeds: [0]

@@ -36,11 +36,17 @@ class PruneDecision:
     order BEFORE removal via PrunableModel.merge_outgoing) fold each removed
     neuron's outgoing weights into a survivor's, so near-duplicate neurons
     can be eliminated with (almost) no change to the network's function.
-    Methods that only drop neurons keep returning a plain list[int].
+    `new_outgoing` (optional, [H, fan_out], applied BEFORE removal via
+    PrunableModel.set_outgoing_weights) replaces the consumer's weights
+    outright -- for reconstruction-based methods (e.g. OSSCAR) that re-solve
+    the surviving weights rather than transfer columns; rows of removed
+    neurons should be zero. Methods that only drop neurons keep returning a
+    plain list[int].
     """
 
     remove: list[int]
     merges: list[MergeOp] = field(default_factory=list)
+    new_outgoing: "torch.Tensor | None" = None
 
 
 @dataclass

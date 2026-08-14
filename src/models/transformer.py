@@ -78,6 +78,9 @@ class ModularTransformer(PrunableModel):
     def prunable_layer(self, idx: int) -> nn.Module:
         return self.layers[idx].ffn.fc1
 
+    def outgoing_module(self, idx: int) -> nn.Module:
+        return self.layers[idx].ffn.fc2
+
     def outgoing_weights(self, idx: int) -> torch.Tensor:
         return self.layers[idx].ffn.fc2.weight.data.t()  # [H, d_model]
 

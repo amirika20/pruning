@@ -124,6 +124,19 @@ Built-in methods:
   `n_remove`, or the paper's data-free histogram-mode cutoff by default
   (optionally scaled by `cutoff_fraction`). Fully-connected style layers only
   (`mlp`, `resmlp`, `transformer`).
+- **osscar** — Meng et al., *OSSCAR: One-Shot Structured Pruning in Vision and
+  Language Models with Combinatorial Optimization* (ICML 2024), ported from
+  the official code (verified bit-exact on the dense-layer case). Minimizes
+  the layer-wise reconstruction loss `‖X·W_dense − X·W‖²` on calibration
+  activations `X` over which neurons to keep *and* the surviving consumer
+  weights: greedy OBS-style elimination with closed-form inverse downdates
+  (`fastprune`), an optional swap local search, then an exact least-squares
+  re-solve on the final support (returned via `PruneDecision.new_outgoing` /
+  the model's `set_outgoing_weights`). One-shot by design — pair with
+  `finetune: {epochs: 0}`. Budgeted only: set `prune_fraction` or `n_remove`;
+  key params `lambda2` (ridge damping, default 1e-2), `update_iter`,
+  `local_search`/`local_iter`/`local_swap`. Fully-connected style layers only
+  (`mlp`, `resmlp`, `transformer`).
 
 ## Adding a new dataset or model
 

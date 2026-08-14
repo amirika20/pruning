@@ -69,6 +69,10 @@ def prune_model(
                     )
                 if ops:
                     current = current.merge_outgoing(layer_idx, ops)
+                # Reconstruction surgery (e.g. OSSCAR): replace the consumer's
+                # weights with the method's re-solved matrix before removal.
+                if decision.new_outgoing is not None:
+                    current = current.set_outgoing_weights(layer_idx, decision.new_outgoing)
             else:
                 selected = [i for i in decision if i not in to_remove]
             per_method[kind] = len(selected)

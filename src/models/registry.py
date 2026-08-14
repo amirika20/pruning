@@ -59,6 +59,29 @@ class PrunableModel(nn.Module, abc.ABC):
         """Return a copy of this model with the given output neurons/filters
         of prunable layer `idx` removed (and downstream consumers fixed)."""
 
+    def outgoing_module(self, idx: int) -> nn.Module:
+        """The module that consumes the activations of prunable layer `idx`
+        (an nn.Linear whose input columns correspond one-to-one to the
+        prunable neurons). Basis for activation capture and weight surgery
+        in reconstruction-based methods like OSSCAR."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not expose its consumer module (reconstruction-"
+            "based pruning supports fully-connected-style layers only: mlp, resmlp, transformer)"
+        )
+
+    def set_outgoing_weights(self, idx: int, new_weights: torch.Tensor) -> "PrunableModel":
+        """Return a copy where the consumer's weights are replaced by
+        `new_weights` ([H, fan_out], same orientation as outgoing_weights) --
+        the surgery step of reconstruction-based methods, which re-solve the
+        surviving weights instead of transferring columns. Neurons are NOT
+        removed here; call prune_layer afterwards."""
+        import copy
+
+        clone = copy.deepcopy(self)
+        module = clone.outgoing_module(idx)
+        module.weight.data = new_weights.t().to(module.weight.dtype).to(module.weight.device).contiguous()
+        return clone
+
     def outgoing_weights(self, idx: int) -> torch.Tensor:
         """[H, fan_out]: for each prunable neuron of layer `idx`, the weights
         through which its activation feeds the next layer. Only meaningful

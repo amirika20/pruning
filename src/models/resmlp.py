@@ -55,6 +55,9 @@ class ResMLP(PrunableModel):
     def prunable_layer(self, idx: int) -> nn.Module:
         return self.blocks[idx].branch[0]
 
+    def outgoing_module(self, idx: int) -> nn.Module:
+        return self.blocks[idx].branch[2]
+
     def outgoing_weights(self, idx: int) -> torch.Tensor:
         return self.blocks[idx].branch[2].weight.data.t()  # [H, out]
 
