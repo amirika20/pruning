@@ -1,0 +1,41 @@
+name: mnist_pixel_cnn
+notes: "CNN on pixel-space MNIST [N, 1, 28, 28]; silent + redundant filter pruning, then fine-tune"
+
+data:
+  kind: mnist
+  params:
+    flatten: false
+    n_samples: 2000
+    train_ratio: 0.8
+
+model:
+  kind: cnn
+  params:
+    hidden_sizes: [32, 64, 128]
+    input_channels: 1
+
+training:
+  optimizer: sgd
+  epochs: 500
+  lr: 1.0e-3
+  batch_size: 64
+  weight_decay: 1.0e-4
+  log_every: 10
+
+pruning:
+  methods:
+    - kind: silent
+    - kind: redundant
+      params:
+        orientation_threshold: 0.1
+        magnitude_threshold: 0.1
+
+finetune:
+  optimizer: adam
+  epochs: 500
+  lr: 1.0e-4
+  batch_size: 64
+  weight_decay: 1.0e-4
+  log_every: 10
+
+seeds: [0]

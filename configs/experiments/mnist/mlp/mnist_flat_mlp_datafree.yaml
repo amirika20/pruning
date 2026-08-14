@@ -1,0 +1,40 @@
+name: mnist_flat_mlp_datafree
+notes: "Srinivas & Babu, 'Data-free Parameter Pruning for Deep Neural Networks' (BMVC 2015),
+  Sec 5.2 protocol, as close as this repo allows: their LeNet keeps 99% of its weights in a
+  single 500-neuron FC layer, which is the only layer they prune -- here that becomes an MLP
+  with one 500-unit hidden layer on flattened MNIST (our conv models have BatchNorm between
+  filter and consumer, so exact merge surgery doesn't apply). Full 60k/10k MNIST train/test
+  split, Caffe LeNet solver hyperparameters (SGD, lr 0.01, momentum 0.9, weight decay 5e-4),
+  pruning via saliency-ranked pairwise merging with the paper's data-free histogram-mode
+  cutoff, and NO fine-tuning -- all reported numbers are straight after prune + surgery,
+  exactly as in the paper."
+
+data:
+  kind: mnist
+  params:
+    flatten: true
+    n_samples: 70000          # 60000 train (full train set) + 10000 val (full test set)
+    train_ratio: 0.857142857142857
+
+model:
+  kind: mlp
+  params:
+    hidden_sizes: [500]       # the paper's prunable FC layer: 500 neurons -> 10 outputs
+
+training:
+  optimizer: sgd
+  epochs: 30
+  lr: 0.01
+  momentum: 0.9
+  batch_size: 64
+  weight_decay: 5.0e-4
+  log_every: 5
+
+pruning:
+  methods:
+    - kind: data_free_merge   # no params: the paper's pure data-free cutoff (histogram mode)
+
+finetune:
+  epochs: 0                   # paper never retrains; the merge surgery is the whole recovery
+
+seeds: [0]

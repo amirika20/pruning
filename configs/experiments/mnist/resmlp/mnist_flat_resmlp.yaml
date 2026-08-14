@@ -1,0 +1,40 @@
+name: mnist_flat_resmlp
+notes: "ResMLP (residual MLP) on flattened MNIST [N, 784]; silent + redundant pruning, then fine-tune"
+
+data:
+  kind: mnist
+  params:
+    flatten: true
+    n_samples: 2000
+    train_ratio: 0.8
+
+model:
+  kind: resmlp
+  params:
+    hidden_sizes: [512, 256, 128]
+
+training:
+  optimizer: sgd
+  epochs: 500
+  lr: 1.0e-3
+  batch_size: 64
+  weight_decay: 1.0e-4
+  log_every: 10
+
+pruning:
+  methods:
+    - kind: silent
+    - kind: redundant
+      params:
+        orientation_threshold: 0.1
+        magnitude_threshold: 0.1
+
+finetune:
+  optimizer: adam
+  epochs: 500
+  lr: 1.0e-4
+  batch_size: 64
+  weight_decay: 1.0e-4
+  log_every: 10
+
+seeds: [0]
