@@ -1,0 +1,27 @@
+name: imagenet_resnet18_pretrained_cluster
+notes: "Pretrained torchvision ResNet-18 on the REAL ImageNet-1k task (1000-way
+  head, no slicing) for the merge-pruning Phase A/B/D studies on the cluster.
+  epochs=0: never trained, only measured. n_samples feeds calibration (~128
+  images used) and the val split used for accuracy budgets; raise n_samples /
+  n_test as node RAM allows (images are held in memory as tensors:
+  N x 3 x 224 x 224 x 4B ~ 0.6 MB each)."
+
+data:
+  kind: imagenet
+  params:
+    root: /n/holylfs06/LABS/kempner_shared/Everyone/testbed/vision/imagenet_1k
+    n_samples: 10000
+    train_ratio: 0.8
+    n_test: 10000
+    image_size: 224
+
+model:
+  kind: resnet_imagenet
+  params:
+    depth: 18
+    pretrained: true
+
+training:
+  epochs: 0
+
+seeds: [0, 1, 2]

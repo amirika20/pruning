@@ -249,6 +249,24 @@ class IterativeMerge:
         return np.concatenate([(w * ubar).sum(axis=0), [(self.A[idx] * rhobar).sum()]])
 
 
+class EllipsoidMerge(IterativeMerge):
+    """1A2: Ward selection with the axis-aligned ellipsoid metric
+    qt = [r ⊙ u ; uᵀx0 − rho], per-feature half-ranges r instead of the scalar
+    R0 — angular disagreement on small-range features (e.g. dead border
+    pixels) is charged proportionally less. Merge rule, surgery, and the
+    certified bound (which stays box-valid) are unchanged."""
+
+    def __init__(self, units: LayerUnits, lo: np.ndarray, hi: np.ndarray):
+        self._rad = (np.asarray(hi, dtype=np.float64)
+                     - np.asarray(lo, dtype=np.float64)) / 2.0
+        super().__init__(units, lo, hi)
+
+    def _qt_of(self, idx: np.ndarray) -> np.ndarray:
+        ubar, rhobar = self._realized_of(idx)
+        return np.concatenate(
+            [self._rad[None, :] * ubar, (ubar @ self.x0 - rhobar)[:, None]], axis=1)
+
+
 # ── self-tests ────────────────────────────────────────────────────────────────
 
 def _selftest() -> None:  # pragma: no cover

@@ -191,6 +191,83 @@ class FunctionalMerge(IterativeMerge):
         return np.where(n_cand > TINY, cost, 0.0)
 
 
+class GaussianMeasureMerge(FunctionalMerge):
+    """Functional selection under z ~ N(mu, C) with arbitrary center and
+    covariance (per-feature variance vector, or full [d, d] matrix).
+
+    1B3 (data-free box-CLT):   mu = box center, C = diag(((hi-lo)/2)^2 / 3)
+    1B4 (matched, data-light): mu, C = moments of ~100 calibration inputs
+
+    A realized unit's pre-activation t_k = (S_u_k^T z - S_rho_k)/n_k is
+    Gaussian with (unnormalized) mean dotmu_k - S_rho_k and variance
+    D_kk = S_u_k^T C S_u_k, and pairs are jointly Gaussian with covariance
+    D_kl -- so every kernel entry is s_k s_l G(z_k, z_l, corr_kl) with
+    z_k = (S_rho_k - dotmu_k)/sqrt(D_kk), s_k = sqrt(D_kk)/n_k. Both D and
+    dotmu are additive under covector merging, so per-step updates stay O(K)
+    with no d-dimensional work after initialization."""
+
+    def __init__(self, units: LayerUnits, lo: np.ndarray, hi: np.ndarray,
+                 mu: np.ndarray, cov: np.ndarray):
+        self._mu = np.asarray(mu, dtype=np.float64)
+        self._covm = np.asarray(cov, dtype=np.float64)
+        super().__init__(units, lo, hi)
+
+    def _apply_cov(self, M: np.ndarray) -> np.ndarray:
+        return M * self._covm[None, :] if self._covm.ndim == 1 else M @ self._covm
+
+    def _metric_init(self) -> None:
+        super()._metric_init()                      # _n, _Cg, _Wg (reused)
+        self._dotmu = self.S_u @ self._mu           # additive under merges
+        Dg = self.S_u @ self._apply_cov(self.S_u).T
+        self._Dg = 0.5 * (Dg + Dg.T)                # symmetrize roundoff
+
+    def _metric_update(self, k: int, l: int) -> None:
+        row = self._Dg[k, :] + self._Dg[l, :]
+        row[k] = self._Dg[k, k] + 2.0 * self._Dg[k, l] + self._Dg[l, l]
+        super()._metric_update(k, l)
+        self._Dg[k, :] = row
+        self._Dg[:, k] = row
+        self._dotmu[k] += self._dotmu[l]
+
+    def _pair_costs(self, k: int, idx: np.ndarray) -> np.ndarray:
+        nk, nl = self._n[k], self._n[idx]
+        ckl = self._Cg[k, idx]
+        n_cand = np.sqrt(np.clip(nk * nk + nl * nl + 2.0 * nk * nl * ckl, 0.0, None))
+
+        Dkk = max(float(self._Dg[k, k]), 0.0)
+        Dll = np.clip(self._Dg[idx, idx], 0.0, None)
+        Dkl = self._Dg[k, idx]
+        Dcc = np.clip(Dkk + 2.0 * Dkl + Dll, 0.0, None)
+        SDk, SDl, SDc = np.sqrt(Dkk), np.sqrt(Dll), np.sqrt(Dcc)
+
+        # standardized offsets (n cancels) and per-unit stds of t
+        rmk = self.S_rho[k] - self._dotmu[k]
+        rml = self.S_rho[idx] - self._dotmu[idx]
+        zk = rmk / max(SDk, 1e-300)
+        zl = rml / np.maximum(SDl, 1e-300)
+        zc = (rmk + rml) / np.maximum(SDc, 1e-300)
+        sk = SDk / max(self._n[k], TINY)
+        sl = SDl / np.where(nl > TINY, nl, TINY)
+        sc = SDc / np.where(n_cand > TINY, n_cand, TINY)
+
+        corr_kl = np.clip(Dkl / np.maximum(SDk * SDl, 1e-300), -1.0, 1.0)
+        corr_kc = np.clip((Dkk + Dkl) / np.maximum(SDk * SDc, 1e-300), -1.0, 1.0)
+        corr_lc = np.clip((Dkl + Dll) / np.maximum(SDl * SDc, 1e-300), -1.0, 1.0)
+
+        Kkk, Kll, Kcc = sk * sk * relu_self(zk), sl * sl * relu_self(zl), sc * sc * relu_self(zc)
+        Kkl = sk * sl * relu_cross(zk, zl, corr_kl)
+        Kkc = sk * sc * relu_cross(zk, zc, corr_kc)
+        Klc = sl * sc * relu_cross(zl, zc, corr_lc)
+
+        wkk = self._Wg[k, k]
+        wll = self._Wg[idx, idx]
+        wkl = self._Wg[k, idx]
+        cost = (wkk * np.clip(Kkk + Kcc - 2.0 * Kkc, 0.0, None)
+                + wll * np.clip(Kll + Kcc - 2.0 * Klc, 0.0, None)
+                + 2.0 * wkl * (Kkl + Kcc - Kkc - Klc))
+        return np.where(n_cand > TINY, np.clip(cost, 0.0, None), 0.0)
+
+
 # ── self-tests ────────────────────────────────────────────────────────────────
 
 def _selftest() -> None:  # pragma: no cover
@@ -273,9 +350,43 @@ def _selftest() -> None:  # pragma: no cover
         eng3.step()
     assert np.abs(eng3.m1_raw() - m1_0).max() / np.abs(m1_0).max() < 1e-12
 
+    # 8. GaussianMeasureMerge: pair cost == MC expected merge damage, N(mu, C)
+    d3, m3 = 8, 5
+    W3 = rng.normal(size=(3, d3)); b3 = rng.normal(size=3); C3 = rng.normal(size=(3, m3))
+    al = np.linalg.norm(W3, axis=1)
+    u3 = LayerUnits(W3 / al[:, None], -b3 / al, al, C3)
+    mu = rng.normal(size=d3) * 0.5
+    A_ = rng.normal(size=(d3, d3)) / np.sqrt(d3)
+    Cov = A_ @ A_.T + 0.1 * np.eye(d3)
+    eng4 = GaussianMeasureMerge(u3, -np.ones(d3), np.ones(d3), mu, Cov)
+    i, j = 0, 1
+    a_w = u3.a
+    S_u = a_w[i] * u3.u[i] + a_w[j] * u3.u[j]
+    ub, rb = S_u / np.linalg.norm(S_u), (a_w[i] * u3.rho[i] + a_w[j] * u3.rho[j]) / np.linalg.norm(S_u)
+    S_c = al[i] * C3[i] + al[j] * C3[j]
+    Lch = np.linalg.cholesky(Cov)
+    Z = mu + rng.standard_normal((2_000_000, d3)) @ Lch.T
+    err = (np.clip(Z @ u3.u[i] - u3.rho[i], 0, None)[:, None] * (al[i] * C3[i])
+           + np.clip(Z @ u3.u[j] - u3.rho[j], 0, None)[:, None] * (al[j] * C3[j])
+           - np.clip(Z @ ub - rb, 0, None)[:, None] * S_c)
+    mc = float(np.mean((err ** 2).sum(axis=1)))
+    cf = float(eng4._cost[i, j])
+    assert abs(cf - mc) / max(mc, 1e-12) < 0.05, (cf, mc)
+
+    # 9. box-CLT measure: duplicates free, sweep completes, m1 conserved
+    r_box = (hi - lo) / 2.0
+    eng5 = GaussianMeasureMerge(units, lo, hi, (lo + hi) / 2.0, r_box * r_box / 3.0)
+    s1, s2 = eng5.step(), eng5.step()
+    assert s1["ward_cost"] < 1e-10 and s2["ward_cost"] < 1e-10
+    m1_0 = eng5.m1_raw()
+    while eng5.n_active > 1:
+        eng5.step()
+    assert np.abs(eng5.m1_raw() - m1_0).max() / np.abs(m1_0).max() < 1e-12
+
     print("functional.py self-tests passed: arc-cosine identity, c=+/-1 branches,")
     print("MC agreement (Gaussian + uniform-ball d=50/784), duplicate exactness,")
     print("dead-neuron absorption, m1 conservation")
+    print("GaussianMeasureMerge: pair cost == MC damage under N(mu, C); box-CLT ok")
 
 
 if __name__ == "__main__":
