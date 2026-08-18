@@ -26,7 +26,9 @@ def build_optimizer(model: nn.Module, cfg: TrainingConfig) -> torch.optim.Optimi
 
 
 def evaluate(model: nn.Module, loader: DataLoader, task: str) -> tuple[float, float | None]:
-    """(mean loss, accuracy) over one pass; accuracy is None unless multiclass."""
+    """(mean loss, accuracy) over one pass; accuracy is None unless multiclass.
+    For task "causal_lm" the loss is next-token cross-entropy per token
+    (labels are the inputs, shifted here) -- perplexity is exp(loss)."""
     device = next(model.parameters()).device
     is_multiclass = task == "multiclass"
     loss_fn = nn.CrossEntropyLoss() if is_multiclass else nn.MSELoss()
@@ -37,7 +39,12 @@ def evaluate(model: nn.Module, loader: DataLoader, task: str) -> tuple[float, fl
             x_batch = x_batch.to(device)
             y_batch = y_batch.to(device)
             pred = model(x_batch)
-            total_loss += loss_fn(pred, y_batch).item() * len(x_batch)
+            if task == "causal_lm":
+                logits = pred[:, :-1].reshape(-1, pred.shape[-1])
+                loss = nn.functional.cross_entropy(logits, y_batch[:, 1:].reshape(-1))
+            else:
+                loss = loss_fn(pred, y_batch)
+            total_loss += loss.item() * len(x_batch)
             if is_multiclass:
                 correct += (pred.argmax(1) == y_batch).sum().item()
     n = len(loader.dataset)
@@ -60,7 +67,15 @@ def train(
 
     Returns (train_losses, val_losses, train_accs, val_accs).
     The accuracy lists are per-epoch floats for multiclass tasks, else [].
+
+    Task "causal_lm" (e.g. the `opt` model) is pretrained-only and cannot be
+    trained here -- any epochs > 0 raise.
     """
+    if task == "causal_lm" and cfg.epochs > 0:
+        raise NotImplementedError(
+            "causal-LM models are pretrained-only in this repo: there is no LM training "
+            "loop. Set training: {epochs: 0} and finetune: {epochs: 0} (one-shot protocol)."
+        )
     device = next(model.parameters()).device
     optimizer = build_optimizer(model, cfg)
     is_multiclass = task == "multiclass"

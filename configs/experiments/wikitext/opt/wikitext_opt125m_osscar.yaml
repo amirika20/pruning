@@ -1,0 +1,31 @@
+name: wikitext_opt125m_osscar
+notes: "OSSCAR one-shot FFN pruning of pretrained OPT-125m, evaluated by WikiText-2 perplexity (the paper's language setting). 20% of FFN neurons per decoder layer; 32 random 512-token train chunks as calibration; test perplexity over the full official test split. Measured on 64 test seqs @ 512 tokens: dense ppl 42.92 -> OSSCAR 44.53 (naive deletion of same neurons: 45.62); layers with many calibration-dead ReLU neurons prune them beyond the budget for free (layer 3: 1278/3072). OPT is pretrained-only -- training/finetune epochs must stay 0 (epochs > 0 raises). Sizes via model.params.size: 125m/350m/1.3b."
+
+data:
+  kind: wikitext
+  params:
+    tokenizer: facebook/opt-125m
+    seq_len: 512
+    n_train: 32        # OSSCAR calibration chunks
+    n_val: 8
+    n_test: null       # full official test split
+
+model:
+  kind: opt
+  params:
+    size: 125m
+    pretrained: true
+
+training:
+  epochs: 0
+
+pruning:
+  methods:
+    - kind: osscar
+      params:
+        prune_fraction: 0.2
+
+finetune:
+  epochs: 0
+
+seeds: [0]

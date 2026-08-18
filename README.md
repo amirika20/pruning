@@ -36,7 +36,7 @@ name: mnist_flat_mlp
 notes: "free-form description"
 
 data:
-  kind: mnist                 # registered in src/data/ (mnist, fashion_mnist, cifar10, cifar100, imagenet, sine, shape2d, modular_add)
+  kind: mnist                 # registered in src/data/ (mnist, fashion_mnist, cifar10, cifar100, imagenet, wikitext, sine, shape2d, modular_add)
   params: {flatten: true, n_samples: 2000, train_ratio: 0.8}
   # vision datasets: n_samples come from the official train split (cut into
   # train/val by train_ratio); the test set is the official test split
@@ -44,7 +44,7 @@ data:
   # held-out test splits.
 
 model:
-  kind: mlp                   # registered in src/models/ (mlp, resmlp, cnn, rescnn, resnet_cifar, resnet_imagenet, mobilenet_v2, vit, transformer)
+  kind: mlp                   # registered in src/models/ (mlp, resmlp, cnn, rescnn, resnet_cifar, resnet_imagenet, mobilenet_v2, vit, opt, transformer)
   params: {hidden_sizes: [512, 256, 128]}
 
 training:  {optimizer: sgd, epochs: 500, lr: 1.0e-3, batch_size: 64, weight_decay: 1.0e-4, log_every: 10}
@@ -151,8 +151,10 @@ Built-in methods:
   ResNet50/MobileNet experiments, on conv models exposing `outgoing_module`
   (`resnet_cifar`, `resnet_imagenet`, `mobilenet_v2`): convs are treated as matrix multiplies
   over `nn.Unfold`-ed input patches, and selection operates on channel groups
-  of kH·kW weight rows (the official code's `ksize`). `vit` encoder MLPs are
-  the plain FC case (same structure as their OPT experiments).
+  of kH·kW weight rows (the official code's `ksize`). `vit` encoder MLPs and
+  `opt` decoder FFNs are the plain FC case (`opt` + the `wikitext` dataset is
+  the paper's language setting: one-shot FFN pruning judged by WikiText-2
+  perplexity; `opt` is pretrained-only -- epochs > 0 raises).
 - **leo_pp** — Serra, Yu, Kumar & Ramalingam, *Scaling Up Exact Neural Network
   Compression by ReLU Stability* (NeurIPS 2021). Exact, lossless, unbudgeted:
   removes only neurons whose ReLU provably never changes sign over the input

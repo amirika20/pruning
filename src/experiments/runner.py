@@ -20,6 +20,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import math
 import platform
 import subprocess
 from datetime import datetime
@@ -113,11 +114,19 @@ def run_single_seed(config: ExperimentConfig, seed: int, device: torch.device, d
     model = build_model(config.model.kind, bundle, **config.model.params).to(device)
 
     def eval_stage(m) -> dict:
-        """val (+ test when the dataset provides one) loss/accuracy of `m`."""
+        """val (+ test when the dataset provides one) loss/accuracy of `m`.
+        For causal-LM tasks the loss is per-token cross-entropy; perplexity
+        (exp of it) is recorded alongside."""
         val_loss, val_acc = evaluate(m, val_loader, bundle.task)
         stage = {"val_loss": val_loss, "val_acc": val_acc}
         if test_loader is not None:
             stage["test_loss"], stage["test_acc"] = evaluate(m, test_loader, bundle.task)
+        if bundle.task == "causal_lm":
+            stage["val_ppl"] = math.exp(val_loss)
+            if "test_loss" in stage:
+                stage["test_ppl"] = math.exp(stage["test_loss"])
+            logging.info("  perplexity: " + "  ".join(
+                f"{k.split('_')[0]}={stage[k]:.2f}" for k in ("val_ppl", "test_ppl") if k in stage))
         return stage
 
     n_params = sum(p.numel() for p in model.parameters())

@@ -5,3 +5,5 @@ scipy>=1.9                 # scipy.optimize.milp (HiGHS) -- leo_pp certification
 matplotlib>=3.7
 tqdm>=4.65
 pyyaml>=6.0
+transformers>=4.40         # OPT causal-LM model (pretrained-only)
+datasets>=2.19             # wikitext perplexity evaluation
