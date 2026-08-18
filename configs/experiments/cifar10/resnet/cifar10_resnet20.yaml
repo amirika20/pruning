@@ -1,0 +1,40 @@
+name: cifar10_resnet20
+notes: "ResNet-20 (CIFAR-style, He et al. 2016) on CIFAR-10; silent + redundant filter pruning, then fine-tune. Other sizes: depth 32/44/56/110."
+
+data:
+  kind: cifar10
+  params:
+    n_samples: 2000
+    train_ratio: 0.8
+
+model:
+  kind: resnet_cifar
+  params:
+    depth: 20
+
+training:
+  optimizer: sgd
+  epochs: 500
+  lr: 1.0e-2
+  momentum: 0.9
+  batch_size: 64
+  weight_decay: 1.0e-4
+  log_every: 10
+
+pruning:
+  methods:
+    - kind: silent
+    - kind: redundant
+      params:
+        orientation_threshold: 0.1
+        magnitude_threshold: 0.1
+
+finetune:
+  optimizer: adam
+  epochs: 500
+  lr: 1.0e-4
+  batch_size: 64
+  weight_decay: 1.0e-4
+  log_every: 10
+
+seeds: [0]

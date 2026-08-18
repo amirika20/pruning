@@ -1,0 +1,38 @@
+name: imagenette_resnet18_pretrained
+notes: "Pretrained (torchvision ImageNet-1k) ResNet-18 evaluated on Imagenette with NO training: the 1000-way head is sliced to Imagenette's 10 classes (they are ImageNet-1k classes), giving ~99% test accuracy out of the box. training.epochs=0 skips training; prune + fine-tune start straight from the checkpoint. Weights download (~45MB) to ~/.cache/torch on first use."
+
+data:
+  kind: imagenet
+  params:
+    root: /home/amirabbas-kazeminia/Projects/neural-network-reparameterization/data_cache/imagenette2-320
+    n_samples: 2000
+    train_ratio: 0.8
+    n_test: 2000
+    image_size: 224
+
+model:
+  kind: resnet_imagenet
+  params:
+    depth: 18
+    pretrained: true
+
+training:
+  epochs: 0
+
+pruning:
+  methods:
+    - kind: silent
+    - kind: redundant
+      params:
+        orientation_threshold: 0.1
+        magnitude_threshold: 0.1
+
+finetune:
+  optimizer: adam
+  epochs: 20
+  lr: 1.0e-5
+  batch_size: 64
+  weight_decay: 1.0e-4
+  log_every: 5
+
+seeds: [0]

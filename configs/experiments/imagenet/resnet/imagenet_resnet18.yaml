@@ -1,0 +1,43 @@
+name: imagenet_resnet18
+notes: "ResNet-18 (ImageNet-style, He et al. 2016) on an ImageNet-1k subset; data.params.root points at the cluster copy (same one the neural-network-reparameterization project trains on) -- for laptop runs use imagenette_resnet18_laptop.yaml instead. Other sizes: depth 34/50/101/152."
+
+data:
+  kind: imagenet
+  params:
+    root: /n/holylfs06/LABS/kempner_shared/Everyone/testbed/vision/imagenet_1k
+    n_samples: 2000
+    train_ratio: 0.8
+    n_test: 2000
+    image_size: 224
+
+model:
+  kind: resnet_imagenet
+  params:
+    depth: 18
+
+training:
+  optimizer: sgd
+  epochs: 200
+  lr: 1.0e-2
+  momentum: 0.9
+  batch_size: 64
+  weight_decay: 1.0e-4
+  log_every: 10
+
+pruning:
+  methods:
+    - kind: silent
+    - kind: redundant
+      params:
+        orientation_threshold: 0.1
+        magnitude_threshold: 0.1
+
+finetune:
+  optimizer: adam
+  epochs: 200
+  lr: 1.0e-4
+  batch_size: 64
+  weight_decay: 1.0e-4
+  log_every: 10
+
+seeds: [0]

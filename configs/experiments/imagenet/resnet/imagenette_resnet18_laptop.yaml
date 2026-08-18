@@ -1,0 +1,43 @@
+name: imagenette_resnet18_laptop
+notes: "ResNet-18 (ImageNet-style) on Imagenette (fast.ai's 10-class ImageNet subset) -- laptop-friendly stand-in for ImageNet, reusing the local copy kept by the neural-network-reparameterization project. Same `imagenet` builder; only `root` differs from the cluster config."
+
+data:
+  kind: imagenet
+  params:
+    root: /home/amirabbas-kazeminia/Projects/neural-network-reparameterization/data_cache/imagenette2-320
+    n_samples: 2000
+    train_ratio: 0.8
+    n_test: 2000
+    image_size: 224
+
+model:
+  kind: resnet_imagenet
+  params:
+    depth: 18
+
+training:
+  optimizer: sgd
+  epochs: 100
+  lr: 1.0e-2
+  momentum: 0.9
+  batch_size: 64
+  weight_decay: 1.0e-4
+  log_every: 10
+
+pruning:
+  methods:
+    - kind: silent
+    - kind: redundant
+      params:
+        orientation_threshold: 0.1
+        magnitude_threshold: 0.1
+
+finetune:
+  optimizer: adam
+  epochs: 100
+  lr: 1.0e-4
+  batch_size: 64
+  weight_decay: 1.0e-4
+  log_every: 10
+
+seeds: [0]

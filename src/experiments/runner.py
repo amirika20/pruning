@@ -192,9 +192,13 @@ def run_single_seed(config: ExperimentConfig, seed: int, device: torch.device, d
             "ft_val_acc": ft_val_accs,
         },
         "final": {
-            "train_loss": train_losses[-1],
-            "val_loss": val_losses[-1],
-            **({"val_acc": val_accs[-1]} if is_multiclass else {}),
+            # Empty when training.epochs == 0 (e.g. starting from a
+            # pretrained model) -- then there is no training history.
+            **({} if not train_losses else {
+                "train_loss": train_losses[-1],
+                "val_loss": val_losses[-1],
+                **({"val_acc": val_accs[-1]} if is_multiclass else {}),
+            }),
             "pruned_val_loss": pruned_val_loss,
             **({"pruned_val_acc": pruned_val_acc} if is_multiclass else {}),
             **({} if skip_finetune else {

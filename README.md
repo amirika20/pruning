@@ -36,7 +36,7 @@ name: mnist_flat_mlp
 notes: "free-form description"
 
 data:
-  kind: mnist                 # registered in src/data/ (mnist, fashion_mnist, sine, shape2d, modular_add)
+  kind: mnist                 # registered in src/data/ (mnist, fashion_mnist, cifar10, cifar100, imagenet, sine, shape2d, modular_add)
   params: {flatten: true, n_samples: 2000, train_ratio: 0.8}
   # vision datasets: n_samples come from the official train split (cut into
   # train/val by train_ratio); the test set is the official test split
@@ -44,7 +44,7 @@ data:
   # held-out test splits.
 
 model:
-  kind: mlp                   # registered in src/models/ (mlp, resmlp, cnn, rescnn, transformer)
+  kind: mlp                   # registered in src/models/ (mlp, resmlp, cnn, rescnn, resnet_cifar, resnet_imagenet, mobilenet_v2, vit, transformer)
   params: {hidden_sizes: [512, 256, 128]}
 
 training:  {optimizer: sgd, epochs: 500, lr: 1.0e-3, batch_size: 64, weight_decay: 1.0e-4, log_every: 10}
