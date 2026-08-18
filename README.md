@@ -146,8 +146,13 @@ Built-in methods:
   the model's `set_outgoing_weights`). One-shot by design — pair with
   `finetune: {epochs: 0}`. Budgeted only: set `prune_fraction` or `n_remove`;
   key params `lambda2` (ridge damping, default 1e-2), `update_iter`,
-  `local_search`/`local_iter`/`local_swap`. Fully-connected style layers only
-  (`mlp`, `resmlp`, `transformer`).
+  `local_search`/`local_iter`/`local_swap`. Works on fully-connected style
+  layers (`mlp`, `resmlp`, `transformer`) and, as in the paper's
+  ResNet50/MobileNet experiments, on conv models exposing `outgoing_module`
+  (`resnet_cifar`, `resnet_imagenet`, `mobilenet_v2`): convs are treated as matrix multiplies
+  over `nn.Unfold`-ed input patches, and selection operates on channel groups
+  of kH·kW weight rows (the official code's `ksize`). `vit` encoder MLPs are
+  the plain FC case (same structure as their OPT experiments).
 - **leo_pp** — Serra, Yu, Kumar & Ramalingam, *Scaling Up Exact Neural Network
   Compression by ReLU Stability* (NeurIPS 2021). Exact, lossless, unbudgeted:
   removes only neurons whose ReLU provably never changes sign over the input

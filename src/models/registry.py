@@ -60,13 +60,15 @@ class PrunableModel(nn.Module, abc.ABC):
         of prunable layer `idx` removed (and downstream consumers fixed)."""
 
     def outgoing_module(self, idx: int) -> nn.Module:
-        """The module that consumes the activations of prunable layer `idx`
-        (an nn.Linear whose input columns correspond one-to-one to the
-        prunable neurons). Basis for activation capture and weight surgery
-        in reconstruction-based methods like OSSCAR."""
+        """The module that consumes the activations of prunable layer `idx`:
+        an nn.Linear whose input columns correspond one-to-one to the
+        prunable neurons, or an nn.Conv2d whose input channels do (conv
+        models override outgoing_weights/set_outgoing_weights to use the
+        unfolded [Cin*kH*kW, Cout] matrix view). Basis for activation capture
+        and weight surgery in reconstruction-based methods like OSSCAR."""
         raise NotImplementedError(
             f"{type(self).__name__} does not expose its consumer module (reconstruction-"
-            "based pruning supports fully-connected-style layers only: mlp, resmlp, transformer)"
+            "based pruning needs it; implemented by mlp, resmlp, transformer, resnet)"
         )
 
     def set_outgoing_weights(self, idx: int, new_weights: torch.Tensor) -> "PrunableModel":

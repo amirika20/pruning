@@ -1,0 +1,31 @@
+name: imagenette_resnet18_osscar
+notes: "OSSCAR one-shot channel pruning (paper's ResNet50/ImageNet protocol, laptop-scale): pretrained ResNet-18, 20% of internal channels per layer, no training and no fine-tuning. Measured: 99.2% -> 98.4% test acc (naive deletion of the same channels: 81.4%)."
+
+data:
+  kind: imagenet
+  params:
+    root: /home/amirabbas-kazeminia/Projects/neural-network-reparameterization/data_cache/imagenette2-320
+    n_samples: 80        # 64 train images = OSSCAR calibration set
+    train_ratio: 0.8
+    n_test: 2000
+    image_size: 224
+
+model:
+  kind: resnet_imagenet
+  params:
+    depth: 18
+    pretrained: true
+
+training:
+  epochs: 0
+
+pruning:
+  methods:
+    - kind: osscar
+      params:
+        prune_fraction: 0.2
+
+finetune:
+  epochs: 0
+
+seeds: [0]

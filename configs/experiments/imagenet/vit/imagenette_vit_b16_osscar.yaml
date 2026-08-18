@@ -1,0 +1,31 @@
+name: imagenette_vit_b16_osscar
+notes: "OSSCAR one-shot pruning of pretrained ViT-B/16 MLP hidden neurons -- not in the OSSCAR paper (they did ResNet50/MobileNet + OPT), but ViT MLPs are exactly the FC structure their OPT experiments prune. No training, no fine-tuning. Measured (Imagenette): dense 100%; 20%/block: OSSCAR 100% vs naive 99.6%; 60%/block (86M -> 52M params): OSSCAR 99.4% vs naive 97.2%. Sizes via model.params.variant (b_16/b_32/l_16/l_32 have pretrained weights; h_14 scratch only)."
+
+data:
+  kind: imagenet
+  params:
+    root: /home/amirabbas-kazeminia/Projects/neural-network-reparameterization/data_cache/imagenette2-320
+    n_samples: 80        # 64 train images = OSSCAR calibration set
+    train_ratio: 0.8
+    n_test: 2000
+    image_size: 224
+
+model:
+  kind: vit
+  params:
+    variant: b_16
+    pretrained: true
+
+training:
+  epochs: 0
+
+pruning:
+  methods:
+    - kind: osscar
+      params:
+        prune_fraction: 0.2
+
+finetune:
+  epochs: 0
+
+seeds: [0]
