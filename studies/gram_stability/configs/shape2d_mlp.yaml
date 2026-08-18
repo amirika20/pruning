@@ -1,0 +1,24 @@
+name: gram_shape2d_mlp
+notes: "Case 2: 2-D binary classification (circle) -- low-dim but a genuinely 2-D arrangement of hyperplanes"
+
+data:
+  kind: shape2d
+  params:
+    shape: circle
+    n_samples: 800
+    noise_std: 0.05
+    train_ratio: 0.8
+
+model:
+  kind: mlp
+  params:
+    hidden_sizes: [64, 64]
+
+training:
+  optimizer: adam
+  epochs: 2000
+  lr: 1.0e-3
+  batch_size: 64
+  log_every: 500
+
+seeds: [0, 1, 2]

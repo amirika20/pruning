@@ -1,0 +1,24 @@
+name: gram_fashion_mnist_mlp
+notes: "Case 4: same architecture, harder dataset -- checks the pattern is not MNIST-specific"
+
+data:
+  kind: fashion_mnist
+  params:
+    flatten: true
+    n_samples: 2000
+    train_ratio: 0.8
+
+model:
+  kind: mlp
+  params:
+    hidden_sizes: [256, 128, 64]
+
+training:
+  optimizer: adam
+  epochs: 150
+  lr: 1.0e-3
+  batch_size: 64
+  weight_decay: 1.0e-4
+  log_every: 50
+
+seeds: [0, 1, 2]
