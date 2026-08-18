@@ -82,6 +82,19 @@ class PrunableModel(nn.Module, abc.ABC):
         module.weight.data = new_weights.t().to(module.weight.dtype).to(module.weight.device).contiguous()
         return clone
 
+    def add_outgoing_bias(self, idx: int, bias_delta: torch.Tensor) -> "PrunableModel":
+        """Return a copy where `bias_delta` ([fan_out]) is added to the
+        consumer's bias -- the constant-absorption step of folding-based
+        methods (e.g. LEO++), which replace a removed neuron's affine
+        contribution with merges plus a constant. Neurons are NOT removed
+        here; call prune_layer afterwards."""
+        import copy
+
+        clone = copy.deepcopy(self)
+        module = clone.outgoing_module(idx)
+        module.bias.data += bias_delta.to(module.bias.dtype).to(module.bias.device)
+        return clone
+
     def outgoing_weights(self, idx: int) -> torch.Tensor:
         """[H, fan_out]: for each prunable neuron of layer `idx`, the weights
         through which its activation feeds the next layer. Only meaningful

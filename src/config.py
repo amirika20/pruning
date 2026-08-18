@@ -54,6 +54,10 @@ class TrainingConfig:
     momentum: float = 0.9  # used by sgd with momentum
     batch_size: int = 64
     weight_decay: float = 0.0
+    # L1 penalty on all Linear weight matrices (not biases), added to the
+    # loss. Serra et al. (NeurIPS 2021) use it to induce the ReLU stability
+    # that lossless compression (leo_pp) exploits.
+    l1: float = 0.0
     log_every: int = 50
     device: str = field(default_factory=_default_device)
 

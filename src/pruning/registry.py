@@ -40,13 +40,17 @@ class PruneDecision:
     PrunableModel.set_outgoing_weights) replaces the consumer's weights
     outright -- for reconstruction-based methods (e.g. OSSCAR) that re-solve
     the surviving weights rather than transfer columns; rows of removed
-    neurons should be zero. Methods that only drop neurons keep returning a
-    plain list[int].
+    neurons should be zero. `bias_delta` (optional, [fan_out], applied after
+    merges via PrunableModel.add_outgoing_bias) is added to the consumer's
+    bias -- for folding-based methods (e.g. LEO++) that absorb a removed
+    neuron's constant contribution into the next layer. Methods that only
+    drop neurons keep returning a plain list[int].
     """
 
     remove: list[int]
     merges: list[MergeOp] = field(default_factory=list)
     new_outgoing: "torch.Tensor | None" = None
+    bias_delta: "torch.Tensor | None" = None
 
 
 @dataclass

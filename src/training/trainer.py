@@ -80,6 +80,12 @@ def train(
             optimizer.zero_grad()
             pred = model(x_batch)
             loss = loss_fn(pred, y_batch)
+            if cfg.l1 > 0:
+                # L1 on Linear weight matrices only (biases excluded), as in
+                # Serra et al. 2021's stability-inducing training.
+                loss = loss + cfg.l1 * sum(
+                    m.weight.abs().sum() for m in model.modules() if isinstance(m, nn.Linear)
+                )
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item() * len(x_batch)

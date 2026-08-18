@@ -69,6 +69,12 @@ def prune_model(
                     )
                 if ops:
                     current = current.merge_outgoing(layer_idx, ops)
+                # Constant absorption (e.g. LEO++): fold the removed neurons'
+                # constant contribution into the consumer's bias. Applied
+                # after merges -- deltas are computed from the removed
+                # neurons' own outgoing columns, which merges never touch.
+                if decision.bias_delta is not None:
+                    current = current.add_outgoing_bias(layer_idx, decision.bias_delta)
                 # Reconstruction surgery (e.g. OSSCAR): replace the consumer's
                 # weights with the method's re-solved matrix before removal.
                 if decision.new_outgoing is not None:

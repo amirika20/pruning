@@ -1,0 +1,53 @@
+name: mnist_flat_mlp_leopp
+notes: "LEO++ (Serra et al., NeurIPS 2021) exact lossless compression on the same
+  500-unit MLP / full-MNIST setup as the osscar/datafree configs. Removes neurons
+  whose ReLU is provably stable over the whole input box -- stably-inactive units
+  are deleted, linearly-dependent stably-active units are folded into the next
+  layer -- so the pruned network computes the SAME function (val/test metrics
+  should match the trained model to float precision; finetune is pointless).
+  Certification: empirical training-set pass, then interval bounds + the ISA MILP
+  (scipy/HiGHS in place of the official Gurobi). The method is unbudgeted: it
+  removes exactly what it can certify. Stability is induced by L1 regularization
+  (paper Sec 6; lambda in their 2.5e-5..4e-4 range) -- with l1: 0 expect few or
+  no stable neurons."
+
+data:
+  kind: mnist
+  params:
+    flatten: true
+    n_samples: 60000          # the full official train split: 54k train + 6k val
+    train_ratio: 0.9          # test = the full official 10k test split
+
+model:
+  kind: mlp
+  params:
+    hidden_sizes: [500]
+
+training:
+  optimizer: sgd
+  epochs: 30
+  lr: 0.01
+  momentum: 0.9
+  batch_size: 64
+  weight_decay: 0.0
+  l1: 2.0e-4                  # the paper's stability-inducing L1 (their train_fcnn.py)
+  log_every: 5
+
+pruning:
+  methods:
+    - kind: leo_pp
+      params:
+        certify: milp         # full ISA certification (paper); "interval" is a
+                              # fast sound-but-incomplete mode, "empirical"
+                              # trusts the training-set pass
+        # The certification domain X: pixel range [0, 1] mapped through this
+        # repo's MNIST normalization (x - 0.1307) / 0.3081.
+        input_box: [-0.4243, 2.8216]
+        # time_limit: 300.0   # MILP budget per layer (unused for 1 hidden layer:
+                              # interval bounds are exact there)
+        # fold_active: true   # also fold rank-deficient stably-active units
+
+finetune:
+  epochs: 0                   # lossless: there is nothing to recover
+
+seeds: [0]

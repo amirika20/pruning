@@ -112,7 +112,10 @@ works on every architecture.
 Methods that go beyond plain removal can return a `PruneDecision` instead of
 a list — its `merges` field holds ordered `MergeOp(removed, survivor, scale)`
 entries, applied via the model's `merge_outgoing` (outgoing-weight transfer)
-before the neurons are deleted.
+before the neurons are deleted; `bias_delta` adds a constant correction to
+the consumer's bias (folding methods, e.g. `leo_pp`), and `new_outgoing`
+replaces the consumer's weights outright (reconstruction methods, e.g.
+`osscar`).
 
 Built-in methods:
 
@@ -145,6 +148,25 @@ Built-in methods:
   key params `lambda2` (ridge damping, default 1e-2), `update_iter`,
   `local_search`/`local_iter`/`local_swap`. Fully-connected style layers only
   (`mlp`, `resmlp`, `transformer`).
+- **leo_pp** — Serra, Yu, Kumar & Ramalingam, *Scaling Up Exact Neural Network
+  Compression by ReLU Stability* (NeurIPS 2021). Exact, lossless, unbudgeted:
+  removes only neurons whose ReLU provably never changes sign over the input
+  box `X` — stably-inactive units (output ≡ 0) are deleted outright, and
+  stably-active units (ReLU ≡ identity) whose weight rows are linearly
+  dependent on the others are folded into the next layer (`MergeOp`s plus a
+  consumer-bias correction via `PruneDecision.bias_delta`), so the pruned net
+  computes the same function as the original on `X`. Certification follows
+  the paper: an empirical training-set pass keeps only always-on/always-off
+  candidates, interval-arithmetic bounds settle the easy ones (exact for the
+  first hidden layer), and the ISA MILP — big-M ReLU encoding, maximize the
+  number of candidate states an input can flip; whatever can't be flipped is
+  certified — resolves the rest (scipy/HiGHS with iterative re-solves in
+  place of the official Gurobi lazy callbacks). `certify: milp|interval|
+  empirical`, `input_box: data|[lo, hi]`, `time_limit`, `fold_active`.
+  Stability is induced by L1 training (`training.l1`, paper §6); pair with
+  `finetune: {epochs: 0}`. `milp`/`interval` need the plain `mlp` model;
+  `empirical` (lossless w.r.t. the training data only, like the official
+  released pipeline) also works on `resmlp`/`transformer` FFN layers.
 
 ## Adding a new dataset or model
 

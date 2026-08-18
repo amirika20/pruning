@@ -1,6 +1,7 @@
 torch>=2.0
 torchvision>=0.15
 numpy>=1.24
+scipy>=1.9                 # scipy.optimize.milp (HiGHS) -- leo_pp certification
 matplotlib>=3.7
 tqdm>=4.65
 pyyaml>=6.0
