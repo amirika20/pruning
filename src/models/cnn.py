@@ -55,6 +55,32 @@ class CNN(PrunableModel):
     def prunable_bn(self, idx: int) -> nn.Module:
         return self.blocks[idx].bn
 
+    def outgoing_module(self, idx: int) -> nn.Module:
+        """The module consuming block `idx`'s (post-BN+ReLU) activations:
+        the next block's conv, or the GAP head Linear for the last block
+        (GAP is linear per channel, so the head reads channels linearly)."""
+        if idx < len(self.blocks) - 1:
+            return self.blocks[idx + 1].conv
+        return self.head
+
+    def outgoing_weights(self, idx: int) -> torch.Tensor:
+        """[H*kk, fan_out], rows grouped per prunable channel (kk = kH*kW for
+        a conv consumer, 1 for the head Linear) -- same layout as ResNet."""
+        consumer = self.outgoing_module(idx)
+        if isinstance(consumer, nn.Conv2d):
+            return consumer.weight.reshape(consumer.out_channels, -1).t()
+        return consumer.weight.data.t()
+
+    def set_outgoing_weights(self, idx: int, new_weights: torch.Tensor) -> "CNN":
+        clone = copy.deepcopy(self)
+        consumer = clone.outgoing_module(idx)
+        if isinstance(consumer, nn.Conv2d):
+            w = new_weights.t().reshape(consumer.weight.shape)
+        else:
+            w = new_weights.t()
+        consumer.weight.data = w.to(consumer.weight.dtype).to(consumer.weight.device).contiguous()
+        return clone
+
     def prune_layer(self, idx: int, indices_to_remove: list[int]) -> "CNN":
         """Remove output filters from CNNBlock `idx`.
 

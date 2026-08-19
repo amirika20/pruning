@@ -252,6 +252,28 @@ dispersion. Cheap to get right — F2 is closed-form and strictly better than F1
   grid before quoting final numbers; ImageNet-scale P3 may separate the
   methods where redundancy is scarce.
 
+- **E10** (Phase D on CNNs, `phase_d_cnn.py`, Conv->BN->ReLU stacks trained on
+  mnist/fashion, 3 seeds, matched 128-image budgets): **our pipeline loses
+  clearly to OSSCAR on conv models** — capacity@-1pt ours 0.17/0.33
+  (mnist/fashion) vs OSSCAR 0.56/0.63; the E9 MLP parity does NOT transfer.
+  Two diagnosed contributors: (i) the Gaussian patch measure is badly
+  misspecified (patches = blank-background spike + sparse rectified
+  foreground; mid-curve, kernel repair degrades much faster than empirical
+  repair at identical structure), and (ii) the merged-unit dictionary itself
+  breaks early — BN-trained conv filters have little clump structure
+  (consistent with E5/cnn_sigmafold), so mean-filters of dissimilar members
+  are garbage while OSSCAR keeps clean originals and re-solves exactly.
+  OSSCAR@128 ~= OSSCAR@full (its data curve saturates immediately).
+  -> Active fix agenda ("ours_v2", within the same 128-image budget):
+  empirical patch Grams for BOTH selection (1B5) and repair; adaptive
+  mean-vs-medoid merge (mean only when the cluster certificate is tight,
+  else keep best member -> interpolates toward subset selection);
+  mean-residual fold via next BN running_mean (4F5-conv, per
+  cnn_sigmafold); optional sequential recompute. Until ours_v2 is validated,
+  the operating recommendation on conv models is: use our dendrogram only in
+  the clump-rich/certified regime, and expect OSSCAR-style subset+LS to win
+  the aggressive regime. Cluster P3 (ResNet) must include these arms.
+
 ## Experiment protocol
 
 **Fixed harness for every arm** (already built in `compare_metrics.py`, extend):
