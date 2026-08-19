@@ -121,9 +121,14 @@ are sub-second per sweep; per-step full-model accuracy evals dominate.
   the hybrid arm: our merged-channel structure + least-squares outgoing
   repair on calibration activations (design-doc 4F4 — expected biggest gain,
   `repair_test` prototype showed ~190x for the always-on fold).
-- **P4** — Phase B surgery grid (4F2 projection — one-flag change; 4F5 bias
-  fold), ResNet-34/50, and the Phase-A cleanup ablations (weighting
+- **P4** — ResNet-34/50 and the Phase-A cleanup ablations (weighting
   a=α‖c‖ vs cascaded importance; greedy vs one-shot matching, 1C7).
+
+UPDATE (E8, Phase B done on laptop): the operating surgery is now
+**mean + kernel global repair (3M1+4F4, `phase_b.py:realize_variant`)** —
++15–22 pts of joint capacity over the sum surgery on MLPs at the same
+128-sample budget. Use it (not mean+sum) in P2's deployable checkpoint and
+P3's OSSCAR comparison; port `realize_variant` to the ResNet realization.
 
 ## What NOT to redo (settled, see DESIGN_SPACE.md Evidence)
 
