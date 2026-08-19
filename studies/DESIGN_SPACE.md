@@ -235,6 +235,23 @@ dispersion. Cheap to get right — F2 is closed-form and strictly better than F1
   3M1 + 4F4 (+4F5 free). Update the OSSCAR comparison plan: our best arm is
   now mean+global at the same 128-sample budget.**
 
+- **E9** (Phase D vs OSSCAR, `phase_d.py`, mnist+fashion, joint
+  equal-fraction pruning, 12-point width grid => +-0.08 resolution): **at the
+  matched 128-input budget our pipeline and OSSCAR are at parity** — every
+  difference is exactly one grid step, in both directions (OSSCAR +1 step on
+  mnist@-1pt: 0.790 vs 0.712; ours +1 step on fashion@-0.5pt: 0.790 vs
+  0.712). Full-calibration OSSCAR (2000 inputs) leads only at the extremes
+  (mnist@-2pt 0.868 vs 0.790) and gains nothing on fashion. **hybrid128
+  (our structure + empirical LS on the same 128 samples) == ours in every
+  cell**: at this budget the Gaussian moments capture everything the raw
+  samples know — the parametric kernel repair loses nothing (consistent with
+  pca_test sufficiency). Reading: accuracy parity at matched data, while our
+  side additionally provides the anytime dendrogram (one pass serves all 12
+  widths; OSSCAR re-ran its search 36x per config), the certified data-free
+  tier, and the merged-unit dictionary. Caveats: MLP scale; refine the width
+  grid before quoting final numbers; ImageNet-scale P3 may separate the
+  methods where redundancy is scarce.
+
 ## Experiment protocol
 
 **Fixed harness for every arm** (already built in `compare_metrics.py`, extend):
