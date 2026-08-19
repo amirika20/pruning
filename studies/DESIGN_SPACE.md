@@ -274,6 +274,17 @@ dispersion. Cheap to get right — F2 is closed-form and strictly better than F1
   the clump-rich/certified regime, and expect OSSCAR-style subset+LS to win
   the aggressive regime. Cluster P3 (ResNet) must include these arms.
 
+- **E11** (removal-set overlap, `overlap_analysis.py`, seed 0): at matched
+  n_remove, our absorbed units and OSSCAR's removals overlap FAR above
+  chance: MLP layer 0 at 25%% removal: 0.84 vs 0.26 chance (0.94 vs 0.50 at
+  half the layer); CNNs at 25%%: 0.50-0.75 vs 0.25. So even where we LOSE on
+  capacity (E10), both methods identify largely the SAME expendable units —
+  the CNN gap is therefore mostly the treatment of survivors (mean-filter
+  corruption + kernel-repair misspecification), not unit identification.
+  This raises the prior on the ours_v2 medoid+empirical fix closing most of
+  the E10 gap, and confirms the E9 parity mechanism on MLPs (same sets,
+  comparable repair -> same capacity).
+
 ## Experiment protocol
 
 **Fixed harness for every arm** (already built in `compare_metrics.py`, extend):
