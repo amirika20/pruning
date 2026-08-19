@@ -218,6 +218,23 @@ dispersion. Cheap to get right — F2 is closed-form and strictly better than F1
   per-slot spread is large (19-76%), so re-test allocation there (cluster
   P2) before trusting "equal fractions is enough" beyond MLPs.
 
+- **E8** (Phase B, surgery grid, `phase_b.py`, mnist+fashion, joint
+  equal-fraction pruning, func_matched partitions fixed across variants):
+  **kernel global repair (4F4) is the single largest gain in the whole
+  search**: capacity@-1pt jumps 0.618→0.772 (mnist) and 0.547→0.772
+  (fashion) over the sum surgery — +15 to +22 pts of the WHOLE network's
+  hidden units, using zero data beyond the same 128-sample moments (the
+  normal equations G_kk C_new = G_ko C are closed-form kernel evaluations).
+  It even beats C2's allocation grid-ORACLE under the old surgery (0.700) —
+  surgery dominates allocation, as E4 predicted. Full hierarchy at -1pt:
+  survivor+sum (3M2, Srinivas-Babu-style) < mean+sum (3M1: the weighted-mean
+  hyperplane is worth +7 to +12 pts over keep-survivor) < mean+proj (4F2,
+  +4 to +8) < mean+global (4F4). Bias compensation (4F5) adds +4 pts to
+  sum-based surgery but nothing on top of global (its LS residual is already
+  ~zero-mean). Both datasets reach 0.810 at -2pt. → **Operating surgery:
+  3M1 + 4F4 (+4F5 free). Update the OSSCAR comparison plan: our best arm is
+  now mean+global at the same 128-sample budget.**
+
 ## Experiment protocol
 
 **Fixed harness for every arm** (already built in `compare_metrics.py`, extend):
