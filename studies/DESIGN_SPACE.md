@@ -312,6 +312,29 @@ dispersion. Cheap to get right — F2 is closed-form and strictly better than F1
   full OSSCAR parity at matched 128-image budget**, while keeping the
   certified data-free tier and merged-unit mode for clump-rich layers.
 
+- **E14** (Phase E, merge-or-delete engine, `phase_e_unified.py`, MLPs,
+  identical mean+global realization and 128-input budget): capacity
+  THREE-WAY TIE within one grid step — merge_only 0.772/0.737,
+  delete_only 0.810/0.737, unified 0.772/0.737 (fashion/mnist @-1pt).
+  Findings: (i) **delete_only = population-OBS at the DL tier is validated
+  as a minimal method** (OBS conditional scores from the analytic kernel,
+  no activations; matches the full merge pipeline). (ii) The predicted
+  unified gain did NOT materialize at the capacity level: with GLOBAL
+  repair at realization, the survivor span is what matters and
+  merge/delete/subset dictionaries have equivalent spans on these layers —
+  **the E8 mean-beats-survivor result holds under weak (sum) repair, not
+  under global repair**; the merged-unit dictionary's advantage is a
+  weak-repair/certified-tier phenomenon. (iii) The disclosed currency bias
+  is real: unified chose deletion 93-100%% of ops (deletion scored
+  exact-given-repair, merges exact-without-repair) — a repair-aware merge
+  score is required before the unified engine can be meaningfully adaptive.
+  (iv) Self-test confirms the channels are individually correct: duplicate
+  pair merged, span-redundant always-on unit deleted, both ~free, realization
+  exact to 5e-16. -> Where the unified engine should actually pay:
+  the CERTIFIED tier (deletions carry no certificate — merges do, so the
+  merge dictionary is forced there) and conv models with empirical Grams
+  (E13 regime). Next: repair-aware merge scoring; unified-on-CNN.
+
 ## Experiment protocol
 
 **Fixed harness for every arm** (already built in `compare_metrics.py`, extend):
