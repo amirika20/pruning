@@ -182,6 +182,23 @@ dispersion. Cheap to get right — F2 is closed-form and strictly better than F1
   exploiting it needs loss/task information (4F4-with-data, 4F6, fine-tune) —
   certified weight-space merging alone yields only a few percent there.
 
+- **E6** (Phase C1, stopping rules post-hoc on all recorded trajectories,
+  `stopping_rules.py`; oracle = last step within layer-error tol; one global
+  knob calibrated on MNIST at <=5% violations, tested frozen on
+  fashion/sine/shape2d): **within-dataset, rules transfer well across seeds
+  and layers** (bound/wq_fro/m1 capture 0.6-0.77 of oracle capacity at zero
+  violations). **Across datasets, no smart rule transfers safely at high
+  capture**: bound(2S1) and the drift rules (2S2/2S3) violate on 43-71% of
+  test runs (the bound's looseness factor and the drift->error scale are
+  dataset-dependent -- E1's Spearman ~1 is an ordering fact, not a
+  calibration fact). The only safe cross-dataset rule is normalized
+  cumulative predicted damage (2S7): ~0.50 capture at 0-3% violations,
+  beating fixed-fraction at tol=1%. Elbow (2S4) is weak everywhere.
+  -> Operating rule: calibrate the certified-bound threshold once per
+  (architecture, dataset) domain -- cheap and then reliable; if zero
+  calibration is allowed, use cum-damage with the global theta and accept
+  ~50% of oracle capacity.
+
 ## Experiment protocol
 
 **Fixed harness for every arm** (already built in `compare_metrics.py`, extend):
