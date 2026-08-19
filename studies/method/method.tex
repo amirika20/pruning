@@ -375,7 +375,9 @@ enlarging $R_0$ by the accumulated upstream error.
 
 Worst-case bounds defend every point of the domain equally; an
 \emph{average-case} theory weights inputs by a probability measure $\mu$ on
-$\R^d$ with finite second moments.
+$\R^d$ with finite second moments. Normalized integrals over a region are
+the special case of a uniform $\mu$ (Section~\ref{sec:ball}); general
+$\mu$ is what permits matching the measure to data.
 
 \begin{definition}[Unit functions and kernel]\label{def:kernel}
 Let $h_i(x) = \alpha_i \relu(u_i^\top x - \rho_i) \in L^2(\mu)$ and define
@@ -401,6 +403,76 @@ is computable without forward passes once $K$ is available.
 
 \begin{proof} Expand the square and exchange expectation with the finite
 sums. \end{proof}
+
+\subsection{The uniform-ball instance: the original integral definition}
+\label{sec:ball}
+
+The framework's first instance --- historically the definition from which the
+rest grew --- takes $\mu$ to be the \emph{uniform measure on the ball}
+$B_{R}(x_0)$, so that the inner products of Definition~\ref{def:kernel} are
+normalized integrals: the \emph{local functional distance}
+\[
+  d_F^2(h_i,h_j) \;=\; \frac{1}{\mathrm{Vol}(B_{R})}
+  \int_{B_{R}(x_0)} \big(h_i(x) - h_j(x)\big)^2\, dx
+  \;=\; \E_{\mu}\big[(h_i - h_j)^2\big],
+  \qquad \mu = \mathrm{Unif}\big(B_R(x_0)\big).
+\]
+This instance admits exact closed forms.
+
+\begin{proposition}[Projection density and moments]\label{prop:balldensity}
+For $z$ uniform on $B_R(x_0)$ and any unit vector $u$, the projection
+$t = u^\top (z - x_0)$ has density
+\[
+  p_d(t) = \frac{c_d}{R}\Big(1 - \tfrac{t^2}{R^2}\Big)^{\frac{d-1}{2}},
+  \quad \abs{t}\le R, \qquad
+  c_d = \frac{\Gamma(\tfrac d2 + 1)}{\sqrt{\pi}\,\Gamma(\tfrac{d+1}{2})},
+\]
+with $\E[t] = 0$ and $\E[t^2] = R^2/(d+2)$. For two unit vectors
+$u_i, u_j$, the joint law of $(t_i, t_j)$ depends only on
+$c = u_i^\top u_j$, by rotational invariance.
+\end{proposition}
+
+\begin{proof}
+Rotational invariance reduces to $u = e_1$; integrating the uniform density
+over the $(d{-}1)$-ball slice of radius $\sqrt{R^2 - t^2}$ gives
+$p_d(t) \propto (1 - t^2/R^2)^{(d-1)/2}$, normalized by the stated beta
+integral. The second moment is the standard beta moment. For the pair,
+rotate $\mathrm{span}\{u_i,u_j\}$ onto the first two coordinates.
+\end{proof}
+
+\begin{proposition}[Exact ball kernels]\label{prop:ballkernels}
+Write each unit's normalized pre-activation as $t - \gamma_{\mathrm{loc}}$
+with $t$ as above. Then the self term
+$A_d(\gamma) = \E[(t-\gamma)_+^2]$ has a closed form in incomplete beta
+functions (expand $(t-\gamma)^2$ against $p_d$ and integrate term-wise), and
+the cross term
+$C_d(\gamma_i,\gamma_j,c) = \E[(t_i-\gamma_i)_+(t_j-\gamma_j)_+]$
+reduces \emph{exactly} to a one-dimensional integral with a closed-form
+integrand, because only the two-dimensional marginal on
+$\mathrm{span}\{u_i,u_j\}$ enters (Proposition~\ref{prop:balldensity}).
+In the centered case,
+\[
+  C_d(0,0,\cos\theta) \;=\; \frac{R^2}{2\pi(d+2)}
+  \big(\sin\theta + (\pi - \theta)\cos\theta\big),
+  \qquad
+  A_d(0) = \frac{R^2}{2(d+2)},
+\]
+so that $d_F^2$ between two centered unit-gain units is the arc-cosine
+kernel distance --- dimension-free after the normalization
+$D_F^2 = \tfrac{d+2}{R^2} d_F^2$.
+\end{proposition}
+
+\begin{remark}[Ball $\to$ Gaussian]\label{rem:balltogauss}
+The Gaussian instance of the next subsection is the computational form of
+the ball instance: $\mathcal N(x_0, \tfrac{R^2}{d+2} I)$ matches \emph{all}
+first and second projection moments of the uniform ball exactly
+(Proposition~\ref{prop:balldensity}), and as $d \to \infty$ the joint
+projection law converges to the corresponding bivariate normal, so the
+Gaussian kernels converge to the ball kernels. Empirically the two agree
+within $5\%$ already at $d \in \{50, 784\}$ (E3), while the Gaussian form
+needs no quadrature (Theorem~\ref{thm:G}). The exact ball form is retained
+as the validation oracle for the closed-form implementation.
+\end{remark}
 
 \subsection{Closed forms under Gaussian measures}
 
