@@ -285,6 +285,20 @@ dispersion. Cheap to get right — F2 is closed-form and strictly better than F1
   the E10 gap, and confirms the E9 parity mechanism on MLPs (same sets,
   comparable repair -> same capacity).
 
+- **E12** (ours-select + OSSCAR-update hybrid on CNNs,
+  `phase_d_cnn_hybrid.py`, same seeds/fractions/budget as E10): keeping our
+  dendrogram's removal sets (medoid-keep per cluster, ORIGINAL surviving
+  filters) and replacing only the repair with OSSCAR's exact damped-LS
+  update **closes 75-85%% of the E10 gap**: capacity@-1pt mnist
+  0.174 -> 0.482 (OSSCAR 0.558), fashion 0.326 -> 0.558 (OSSCAR 0.629).
+  Residual = one grid step (~0.08) in both cases — the remaining edge of
+  OSSCAR's conditional OBS scores + swap refinement over our geometric
+  selection. Confirms E11's attribution: on conv models the failure was the
+  surgery (mean-filters + kernel repair), not the selection. → Operating
+  conv recipe: our anytime dendrogram for selection, medoid survivors,
+  OSSCAR-style exact LS on the support for repair (same 128 images). Use
+  this arm in cluster P2/P3.
+
 ## Experiment protocol
 
 **Fixed harness for every arm** (already built in `compare_metrics.py`, extend):
