@@ -130,6 +130,14 @@ UPDATE (E8, Phase B done on laptop): the operating surgery is now
 128-sample budget. Use it (not mean+sum) in P2's deployable checkpoint and
 P3's OSSCAR comparison; port `realize_variant` to the ResNet realization.
 
+UPDATE 2 (E10-E13): on Conv+BN models use the CONV RECIPE instead of
+mean+global: our dendrogram selection + medoid survivors + OSSCAR-style
+exact LS on the support + swap refinement (`phase_d_cnn_hybrid.py`) — full
+OSSCAR parity at the 128-image budget on CNNs (E13), whereas merged units +
+kernel repair lose badly there (E10; Gaussian patch measure misspecified,
+mean-filters corrupt survivors). Kernel repair remains the winner on
+MLP-style layers only (E8/E9).
+
 ## What NOT to redo (settled, see DESIGN_SPACE.md Evidence)
 
 E1: stopping = certified-bound budget (Spearman 0.99–1.0 vs true error);

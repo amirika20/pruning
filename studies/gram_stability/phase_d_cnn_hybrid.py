@@ -45,10 +45,13 @@ CONFIGS = [
 ]
 
 
-def osscar_update(model, bundle, li: int, removed: list[int], calib: torch.Tensor):
-    """OSSCAR's exact repair for a GIVEN removal set: damped XtX over the
-    consumer's calibration inputs, least squares on the support."""
-    helper = OSSCAR(n_remove=1)  # only used for its XtX collector + conventions
+def osscar_update(model, bundle, li: int, removed: list[int], calib: torch.Tensor,
+                  swap: bool = False):
+    """OSSCAR's exact repair for a GIVEN removal set (damped XtX over the
+    consumer's calibration inputs, least squares on the support); with
+    swap=True, the removal set is first refined by OSSCAR's local search
+    (equal-count swaps, accept on objective improvement)."""
+    helper = OSSCAR(n_remove=1)  # only used for XtX collector + conventions
     ctx = PruneContext(train_inputs=calib, bundle=bundle, device=torch.device("cpu"))
     XtX = helper._collect_XtX(model, li, ctx)
     R = XtX.shape[0]
@@ -60,12 +63,15 @@ def osscar_update(model, bundle, li: int, removed: list[int], calib: torch.Tenso
     XtY = XtX @ B
     mask = torch.zeros(H, dtype=torch.bool)
     mask[list(removed)] = True
+    if swap:
+        mask = helper._local_search_stage(XtX, XtY, mask, kk)
     W_new = _solve_support(XtX, XtY, _expand(mask, kk))
     model = model.set_outgoing_weights(li, W_new)
-    return model.prune_layer(li, sorted(removed))
+    return model.prune_layer(li, sorted(mask.nonzero(as_tuple=True)[0].tolist()))
 
 
-def apply_cuts_hybrid_v2(model, bundle, cuts, dendros, calib: torch.Tensor):
+def apply_cuts_hybrid_v2(model, bundle, cuts, dendros, calib: torch.Tensor,
+                         swap: bool = False):
     cur = model
     for li, k in enumerate(cuts):
         pairs, idx_map, frozen, a_full = dendros[li]
@@ -73,7 +79,7 @@ def apply_cuts_hybrid_v2(model, bundle, cuts, dendros, calib: torch.Tensor):
         removed = ours_removed(a_full, idx_map, frozen, pairs, k)
         if not removed:
             continue
-        cur = osscar_update(cur, bundle, li, sorted(removed), calib)
+        cur = osscar_update(cur, bundle, li, sorted(removed), calib, swap=swap)
     return cur
 
 
@@ -103,21 +109,30 @@ def main() -> None:
                 pairs, _ = dendrogram(eng)
                 dendros.append((pairs, idx_map, frozen, units.a))
 
-            for f in np.linspace(0.1, 0.95, 12):
+            from studies.gram_stability.phase_d_cnn import apply_cuts_osscar
+            for f in np.linspace(0.35, 0.80, 14):
                 cuts = [int(round(f * (h - 1))) for h in Hs]
-                pruned = apply_cuts_hybrid_v2(model, bundle, cuts, dendros, calib)
-                acc = val_acc(pruned, bundle)
-                records.append({"seed": seed, "frac_removed": sum(cuts) / sum(Hs),
-                                "val_acc": acc, "acc0": acc0})
-                logging.info(f"[{config.name}] seed {seed} f={f:.2f}: "
-                             f"ours_sel+osscar_upd={acc:.3f}")
+                frac = sum(cuts) / sum(Hs)
+                arms = {
+                    "hybrid": lambda: apply_cuts_hybrid_v2(model, bundle, cuts, dendros, calib),
+                    "hybrid_swap": lambda: apply_cuts_hybrid_v2(model, bundle, cuts, dendros, calib, swap=True),
+                    "osscar128": lambda: apply_cuts_osscar(model, bundle, cuts, calib),
+                }
+                for arm, fn in arms.items():
+                    records.append({"seed": seed, "arm": arm, "frac_removed": frac,
+                                    "val_acc": val_acc(fn(), bundle), "acc0": acc0})
+                logging.info(f"[{config.name}] seed {seed} f={f:.2f}: " + "  ".join(
+                    f"{r['arm']}={r['val_acc']:.3f}" for r in records[-3:]))
         df = pd.DataFrame(records)
-        caps = {d: np.median([capacity(g, d) for _, g in df.groupby("seed")])
-                for d in (0.005, 0.01, 0.02)}
-        out = (f"ours-select + OSSCAR-update on {config.name}: "
-               f"cap@-0.5pt={caps[0.005]:.3f} cap@-1pt={caps[0.01]:.3f} "
-               f"cap@-2pt={caps[0.02]:.3f}")
-        logging.info(out)
+        lines = []
+        for arm in ["hybrid", "hybrid_swap", "osscar128"]:
+            sub = df[df.arm == arm]
+            caps = {d: np.median([capacity(g, d) for _, g in sub.groupby("seed")])
+                    for d in (0.005, 0.01, 0.02)}
+            lines.append(f"  {arm:<12} cap@-0.5pt={caps[0.005]:.3f} "
+                         f"cap@-1pt={caps[0.01]:.3f} cap@-2pt={caps[0.02]:.3f}")
+        out = f"fine-grid gap test on {config.name} (NOTE: caps floor at 0.35 = grid start):\n" + "\n".join(lines)
+        logging.info("\n" + out)
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         (STUDY_ROOT / "outputs" / f"dcnn_hybrid_{config.name}_{stamp}.txt").write_text(
             out + "\n")

@@ -299,6 +299,19 @@ dispersion. Cheap to get right — F2 is closed-form and strictly better than F1
   OSSCAR-style exact LS on the support for repair (same 128 images). Use
   this arm in cluster P2/P3.
 
+- **E13** (fine-grid gap test + swap graft, `phase_d_cnn_hybrid.py`): adding
+  OSSCAR's swap refinement on top of OUR removal sets (`hybrid_swap`) closes
+  the residual E12 gap COMPLETELY: mnist capacities identical to osscar128
+  at every tolerance (0.549/-1pt, 0.580/-2pt, fine +-0.035 grid); fashion
+  mixed within one fine step (swap WINS at -0.5pt: 0.616 vs 0.580; tie at
+  -1pt; -1 step at -2pt). Full E10 gap decomposition (mnist@-1pt):
+  ours 0.174 -> +exact-LS update 0.482 (+0.31, the surgery) -> +swap 0.549
+  (+0.07, greedy myopia) = OSSCAR 0.549. Nothing left unattributed.
+  -> **Final conv recipe: our dendrogram selection (anytime, one pass for
+  all widths) + medoid survivors + OSSCAR-style exact LS + swap refinement =
+  full OSSCAR parity at matched 128-image budget**, while keeping the
+  certified data-free tier and merged-unit mode for clump-rich layers.
+
 ## Experiment protocol
 
 **Fixed harness for every arm** (already built in `compare_metrics.py`, extend):
