@@ -120,3 +120,23 @@ fig.savefig(FIGS / "fig_bound.pdf")
 plt.close(fig)
 
 print("wrote", sorted(p.name for p in FIGS.glob("*.pdf")))
+
+# ── E: first-moment conservation (Prop 3.3) vs realized drift ────────────────
+df = pd.read_csv(ROOT / "gram_mnist_mlp_20260817_150158" / "steps.csv")
+fig, ax = plt.subplots(figsize=(4.4, 3.0))
+for (s, l), g in df.groupby(["seed", "layer"]):
+    g = g.sort_values("step")
+    raw = (g.m1_raw_ratio - 1).abs().clip(lower=1e-17)
+    real = (g.m1_real_ratio - 1).abs().clip(lower=1e-17)
+    ax.plot(g.frac_merged, raw, color=SLOT[0], lw=1.1, alpha=0.55,
+            label="raw covector sum (exact invariant)" if (s, l) == (0, 0) else None)
+    ax.plot(g.frac_merged, real, color=SLOT[1], lw=1.1, alpha=0.55,
+            label="realized first moment" if (s, l) == (0, 0) else None)
+ax.set_yscale("log")
+ax.set_ylim(1e-17, 3)
+style(ax, "fraction of layer merged", "relative drift of first moment",
+      "First-moment conservation (all layers, seeds)")
+ax.legend(loc="center left")
+fig.tight_layout()
+fig.savefig(FIGS / "fig_moment.pdf")
+plt.close(fig)

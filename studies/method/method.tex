@@ -641,8 +641,8 @@ seeds/layers within a dataset (0.6--0.77 of oracle capacity at zero
 violations) but its pessimism factor is domain-dependent --- ordering is
 certified, calibration is per-domain. \\[2pt]
 Conservation laws (Prop~\ref{prop:moment}) &
-E1: first moment conserved to $2\times10^{-16}$; orientation-block energy
-conserved mechanically (this \emph{predicted} the blindness of trace-based
+E1 and Figure~\ref{fig:moment}: first moment conserved to $2\times10^{-16}$
+along every trajectory; orientation-block energy conserved mechanically (this \emph{predicted} the blindness of trace-based
 spectral stopping rules, confirmed). \\[2pt]
 Exactness and identity (Thms~\ref{thm:exact},~\ref{thm:identity}) &
 E3: machine-precision on coincident units with arbitrary fan-out;
@@ -724,6 +724,22 @@ switching to the exact-LS repair recovers most of the gap; one swap
 refinement pass reaches OSSCAR exactly --- selection was never the problem
 (cf.\ the overlap of Table~\ref{tab:cnn}).}
 \label{fig:surgery-cnn}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.6\textwidth]{figs/fig_moment.pdf}
+\caption{\textbf{Conservation laws in the data (Prop.~\ref{prop:moment},
+Rem.~\ref{rem:overshoot}).} Relative drift of the layer's total first moment
+along every merge trajectory (MNIST-MLP, all layers and seeds, log scale).
+The raw covector sum is conserved \emph{exactly} --- flat at the
+$10^{-16}$ machine-precision floor through the full trajectory, as
+Proposition~\ref{prop:moment} requires. The \emph{realized} first moment
+(computed from the renormalized merged units) deviates at second order in
+cluster dispersion: negligible while genuine clusters are being consumed,
+growing to $O(1)$ only in the forced-merge regime --- the overshoot factor
+$A_C/\norm{S_u}$ of Remark~\ref{rem:overshoot} made visible.}
+\label{fig:moment}
 \end{figure}
 
 \begin{table}[t]
