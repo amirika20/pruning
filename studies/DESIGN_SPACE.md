@@ -199,6 +199,25 @@ dispersion. Cheap to get right — F2 is closed-form and strictly better than F1
   calibration is allowed, use cum-damage with the global theta and accept
   ~50% of oracle capacity.
 
+- **E7** (Phase C2, cross-layer allocation, `phase_c2.py`, mnist+fashion, 3
+  seeds, all layers pruned JOINTLY): with `func_matched` selection, **64-70%
+  of ALL hidden units are removable at -1pt val acc**, and the allocation
+  strategy barely matters — equal fractions, raw greedy, and normalized
+  greedy all land within ~5pts of the brute-force grid oracle (mnist: equal
+  0.647, greedy_norm 0.650, grid 0.700; fashion: greedy_raw 0.645 ≈ grid
+  0.640). Sequential recomputation of dendrograms on the pruned model does
+  NOT beat intact-model partitions (parity for func_matched; much worse for
+  ward on mnist, 0.31 vs 0.48) → **intact-model dendrograms are sufficient;
+  the cheap one-pass deployment recipe is sound**. WARD COSTS MUST NOT drive
+  cross-layer greedy (0.41-0.48 vs its own equal-frac 0.55-0.62): worst-case
+  geometric costs aren't comparable across layers even normalized — in the
+  data-free tier allocate by equal fractions. Raw-vs-normalized greedy is
+  inconclusive on MLPs (norm better on mnist, raw on fashion); keep
+  normalized as the principled default. CAVEAT: MLP layers here have similar
+  per-layer capacities, so allocation had little to exploit — on ResNet the
+  per-slot spread is large (19-76%), so re-test allocation there (cluster
+  P2) before trusting "equal fractions is enough" beyond MLPs.
+
 ## Experiment protocol
 
 **Fixed harness for every arm** (already built in `compare_metrics.py`, extend):
