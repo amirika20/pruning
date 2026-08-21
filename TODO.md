@@ -98,6 +98,20 @@ way and measured at a scale where the O(H^2) pass actually dominates.
       MLPs, so allocation barely matters there — but its own caveat says per-slot
       capacity on ResNet spreads 19–76%, so re-test allocation on conv rather
       than inheriting "equal fractions is enough".
+- [x] **DONE.** ~~Trim the arm grid at scale.~~ Two tiers, declared in
+      `configs/benchmark/arms.yaml` (`headline:` list) and per-entry
+      `arms_tier` in suite.yaml. HEADLINE (~13 arms) answers "how much can this
+      remove, against the baselines" and runs on every model; ABLATION (the rest
+      of the design grid) runs only where 3 seeds are affordable. Rationale is in
+      the arms.yaml tier note: E14/E15/E17 show the dictionary, the score and
+      exact-damage-vs-delta_f all COLLAPSE under a global repair, and the repair
+      ordering is guaranteed rather than measured -- so the grid at ImageNet/OPT
+      scale would re-confirm the small-model structure at ONE seed, where a
+      24-cell table invites reading noise as signal. Two axes stay headline
+      anyway because they are open at scale: merge-vs-medoid on real conv
+      backbones (E10/E13 came from toy CNNs), and the collapse re-tested on a
+      transformer FFN. Submit with `--tier headline` then `--tier ablation`.
+
 - [ ] **Decide the headline metric set.** Opinion, worth arguing about: tables
       that are capacity-only will mostly show ties, because E14 and E15 together
       say the dictionary *and* the selection criterion stop mattering under

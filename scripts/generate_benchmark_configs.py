@@ -41,7 +41,12 @@ PLACEHOLDER = "PLACEHOLDER_IMAGENET_ROOT"   # none left in suite.yaml; kept for 
 # ── arm expansion ────────────────────────────────────────────────────────────
 
 def expand_arms(arms_spec: dict) -> list[dict]:
-    """[{name, kind, params, requires}] from the explicit arms plus the grids."""
+    """[{name, kind, params, requires, tier}] from the explicit arms plus grids.
+
+    `tier` is 'headline' for names listed under arms.yaml's `headline:` key and
+    'ablation' otherwise. Headline is a SUBSET of all, so a tier of 'all' runs
+    both.
+    """
     out: list[dict] = []
     for a in arms_spec.get("arms", []) or []:
         out.append({"name": a["name"], "kind": a["kind"],
@@ -65,11 +70,16 @@ def expand_arms(arms_spec: dict) -> list[dict]:
             out.append({"name": f"{g['prefix']}_{tag}", "kind": g["kind"],
                         "params": params, "requires": requires})
 
+    headline = set(arms_spec.get("headline") or [])
     seen: dict[str, dict] = {}
     for a in out:
         if a["name"] in seen:
             raise ValueError(f"duplicate arm name {a['name']!r}")
+        a["tier"] = "headline" if a["name"] in headline else "ablation"
         seen[a["name"]] = a
+    unknown = headline - set(seen)
+    if unknown:
+        raise ValueError(f"arms.yaml headline names no such arm(s): {sorted(unknown)}")
     return out
 
 
@@ -125,6 +135,8 @@ def main() -> None:
                     help="keep only these suite entries (by name)")
     ap.add_argument("--resources", nargs="*", default=None,
                     help="keep only these resource classes")
+    ap.add_argument("--tier", choices=("headline", "ablation", "all"), default=None,
+                    help="override every entry's arms_tier (default: per-entry)")
     ap.add_argument("--output-root", default=None,
                     help="where results go (default: suite.yaml's, i.e. lab scratch)")
     ap.add_argument("--dry-run", action="store_true")
@@ -157,9 +169,15 @@ def main() -> None:
     per_entry: list[tuple[str, int, str]] = []
     missing_root: list[str] = []
 
+    default_tier = defaults.get("arms_tier", "headline")
     for entry in entries:
         kept = 0
+        tier = args.tier or entry.get("arms_tier", default_tier)
         for arm in arms:
+            if tier == "headline" and arm["tier"] != "headline":
+                continue
+            if tier == "ablation" and arm["tier"] == "headline":
+                continue
             if arm.get("requires") == "fc" and entry.get("family") != "fc":
                 skipped[f"{arm['name']} (fc-only) on conv"] = \
                     skipped.get(f"{arm['name']} (fc-only) on conv", 0) + 1
@@ -175,21 +193,23 @@ def main() -> None:
             rel = Path(entry["name"]) / f"{arm['name']}.yaml"
             rec = str(Path("configs/benchmark/generated") / rel)
             manifest.append(rec)
-            by_class.setdefault(entry.get("resources", "small"), []).append(rec)
+            cls = entry.get("resources", "small")
+            by_class.setdefault(cls, []).append(rec)
+            by_class.setdefault(f"{cls}_{arm['tier']}", []).append(rec)
             kept += 1
             if not args.dry_run:
                 path = OUT / rel
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(yaml.safe_dump(cfg, sort_keys=False, width=100))
-        per_entry.append((entry["name"], kept, entry.get("resources", "?")))
+        per_entry.append((entry["name"], kept, entry.get("resources", "?"), tier))
 
     print(f"\n{len(arms)} arms x {len(entries)} entries")
-    print(f"{'entry':<26}{'configs':>9}{'resources':>11}")
-    for name, n, res in per_entry:
-        print(f"  {name:<24}{n:>9}{res:>11}")
+    print(f"{'entry':<26}{'configs':>9}{'resources':>11}{'tier':>11}")
+    for name, n, res, tier in per_entry:
+        print(f"  {name:<24}{n:>9}{res:>11}{tier:>11}")
     total_jobs = sum(
         n * len(overrides.get(name, defaults.get("seeds", [0])))
-        for name, n, _ in per_entry)
+        for name, n, _, _ in per_entry)
     print(f"\n{len(manifest)} configs  ->  {total_jobs} (config x seed) runs")
     if skipped:
         print("\nskipped (method would refuse):")
@@ -205,11 +225,17 @@ def main() -> None:
             (BENCH / f"manifest_{cls}.txt").write_text("\n".join(rows) + "\n")
         print(f"\nwrote {OUT}")
         print(f"wrote {BENCH / 'manifest.txt'} ({len(manifest)} lines)")
-        print("\nsubmit one array per resource class:")
-        for cls, rows in sorted(by_class.items()):
-            print(f"  sbatch --array=1-{len(rows)} scripts/slurm_{cls}.sh "
-                  f"configs/benchmark/manifest_{cls}.txt")
-        print("\n  ...or all of them:  bash scripts/submit_benchmark.sh")
+        base = {c: r for c, r in by_class.items()
+                if not c.endswith(("_headline", "_ablation"))}
+        print("\ncells per class:")
+        for cls in sorted(base):
+            h = len(by_class.get(f"{cls}_headline", []))
+            a = len(by_class.get(f"{cls}_ablation", []))
+            print(f"  {cls:<8}{len(base[cls]):>5} total  ({h} headline, {a} ablation)")
+        print("\nstaged submission -- headline first populates Tables 2/3:")
+        print("  bash scripts/submit_benchmark.sh --tier headline")
+        print("  bash scripts/submit_benchmark.sh --tier ablation")
+        print("  bash scripts/submit_benchmark.sh                  # everything")
 
 
 if __name__ == "__main__":

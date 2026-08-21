@@ -16,6 +16,11 @@
 #
 # `resources` selects the SLURM profile in scripts/slurm_*.sh.
 #
+# `arms_tier` picks which arms this entry runs: `all` for the full ablation grid
+# (the cheap entries, which can also afford 3 seeds), `headline` for the rest.
+# See the tier note at the top of arms.yaml for why that split is scientific
+# rather than budgetary. Default below; --tier overrides everything.
+#
 # ImageNet-1k is read from the Kempner shared testbed
 # (/n/holylfs06/LABS/kempner_shared/Everyone/testbed/vision/imagenet_1k);
 # override with --imagenet-root if that path moves.
@@ -24,6 +29,7 @@ entries:
 
   # ── trained here (no published checkpoint) ─────────────────────────────────
   - name: mnist_mlp
+    arms_tier: all
     family: fc
     resources: small
     train: true
@@ -32,6 +38,7 @@ entries:
     training: {optimizer: adam, epochs: 60, lr: 1.0e-3, batch_size: 128, weight_decay: 1.0e-4}
 
   - name: fashion_mnist_mlp
+    arms_tier: all
     family: fc
     resources: small
     train: true
@@ -40,6 +47,7 @@ entries:
     training: {optimizer: adam, epochs: 60, lr: 1.0e-3, batch_size: 128, weight_decay: 1.0e-4}
 
   - name: mnist_cnn
+    arms_tier: all
     family: conv
     resources: small
     train: true
@@ -48,6 +56,7 @@ entries:
     training: {optimizer: adam, epochs: 40, lr: 1.0e-3, batch_size: 128, weight_decay: 1.0e-4}
 
   - name: modular_transformer
+    arms_tier: all
     family: fc
     resources: small
     train: true
@@ -57,6 +66,7 @@ entries:
 
   # ── CIFAR-10: downloaded (chenyaofo/pytorch-cifar-models via torch.hub) ────
   - name: cifar10_resnet20
+    arms_tier: all
     family: conv
     resources: medium
     data: {kind: cifar10, params: {n_samples: 10000, train_ratio: 0.8, n_test: 10000}}
@@ -104,6 +114,7 @@ entries:
   # float32 footprint ~4 bytes/param: 1.3b ~5GB, 2.7b ~11GB, 6.7b ~27GB,
   # 13b ~52GB before activations.
   - name: wikitext_opt125m
+    arms_tier: all
     family: fc
     resources: medium
     data: {kind: wikitext, params: {tokenizer: facebook/opt-125m, seq_len: 512,
@@ -111,6 +122,7 @@ entries:
     model: {kind: opt, params: {size: 125m, pretrained: true}}
 
   - name: wikitext_opt350m
+    arms_tier: all
     family: fc
     resources: medium
     data: {kind: wikitext, params: {tokenizer: facebook/opt-350m, seq_len: 512,
@@ -160,6 +172,7 @@ defaults:
   finetune: {epochs: 0}
   # Pretrained entries skip training entirely.
   training_pretrained: {epochs: 0}
+  arms_tier: headline
   analyze_geometry: true
   deterministic: true
   # Lab scratch: home is quota'd and 13b OPT weights alone are ~52GB.

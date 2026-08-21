@@ -24,6 +24,44 @@
 # Everything else -- every score, both dictionaries, sum and empirical repair --
 # runs on conv and BatchNorm.
 
+# ── tiers ────────────────────────────────────────────────────────────────────
+#
+# HEADLINE arms answer "how much can this method remove, against the
+# baselines" -- Tables 2 and 3. Every other arm is ABLATION: it answers "which
+# design axis matters", which is Table 4.
+#
+# The split is not about cost. The ledger already shows the axes COLLAPSE under
+# a global repair -- the dictionary (E14), the selection criterion (E15), and
+# exact_damage against delta_f (E17) -- while the repair ordering itself is
+# guaranteed by nested feasible sets rather than measured. So most of the grid
+# at ImageNet/OPT scale would re-confirm a structure the small models already
+# establish, and it would do so at ONE seed, where a 24-cell table invites
+# reading noise as signal. The ablation needs seeds, not models.
+#
+# Two axes are deliberately headline anyway, because at scale they are open
+# questions rather than confirmations:
+#   * merge vs medoid on conv -- E10/E13 found merged filters lose on
+#     BatchNorm-trained conv, but from two-block toy CNNs. Whether that survives
+#     on a real ImageNet backbone is untested, so both are headline.
+#   * cylinder vs delta_f under a global repair -- the collapse is established
+#     on MLPs; the suite entries with `arms_tier: all` (including the small
+#     transformer and OPT-125m/350m) re-test it where a transformer FFN is
+#     claimed to be "literally the layer of the theory".
+headline:
+  - random
+  - magnitude_mass
+  - saturated_dead_empirical
+  - saturated_dead_margin
+  - mash_certified
+  - osscar
+  - hope
+  - data_free_merge
+  - leo_pp
+  - mash_merge_sum_cylinder          # Ours_cert: domain-only selection + sum
+  - mash_merge_kernel_delta_f        # Ours_full on fully-connected layers
+  - mash_merge_empirical_delta_f     # Ours_full on conv
+  - mash_medoid_empirical_delta_f    # the conv recipe (medoid survivors)
+
 # ── explicit arms ────────────────────────────────────────────────────────────
 arms:
 
