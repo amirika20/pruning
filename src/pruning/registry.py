@@ -43,7 +43,12 @@ class PruneDecision:
     neurons should be zero. `bias_delta` (optional, [fan_out], applied after
     merges via PrunableModel.add_outgoing_bias) is added to the consumer's
     bias -- for folding-based methods (e.g. LEO++) that absorb a removed
-    neuron's constant contribution into the next layer. Methods that only
+    neuron's constant contribution into the next layer.
+    `new_incoming` (optional, (weight, bias) for the PRUNABLE layer itself,
+    applied BEFORE removal) rewrites surviving units' own hyperplanes -- for
+    methods (e.g. HOPE) whose merge synthesizes a new parent unit that no
+    original member realizes, rather than only transferring outgoing columns.
+    Rows belonging to removed units are ignored. Methods that only
     drop neurons keep returning a plain list[int].
     """
 
@@ -51,6 +56,7 @@ class PruneDecision:
     merges: list[MergeOp] = field(default_factory=list)
     new_outgoing: "torch.Tensor | None" = None
     bias_delta: "torch.Tensor | None" = None
+    new_incoming: "tuple[torch.Tensor, torch.Tensor] | None" = None
 
 
 @dataclass

@@ -69,6 +69,18 @@ def prune_model(
                     )
                 if ops:
                     current = current.merge_outgoing(layer_idx, ops)
+                # Parent-neuron surgery (e.g. HOPE): the method synthesized new
+                # hyperplanes for surviving units, so rewrite the prunable
+                # layer's own rows/bias before removal. Removed rows are
+                # dropped by prune_layer below, so their values don't matter.
+                if decision.new_incoming is not None:
+                    w_new, b_new = decision.new_incoming
+                    lin = current.prunable_layer(layer_idx)
+                    lin.weight.data.copy_(
+                        w_new.to(lin.weight.dtype).to(lin.weight.device).view_as(lin.weight))
+                    if lin.bias is not None:
+                        lin.bias.data.copy_(
+                            b_new.to(lin.bias.dtype).to(lin.bias.device).view_as(lin.bias))
                 # Constant absorption (e.g. LEO++): fold the removed neurons'
                 # constant contribution into the consumer's bias. Applied
                 # after merges -- deltas are computed from the removed
