@@ -13,6 +13,19 @@ python scripts/run_experiment.py --config configs/experiments/mnist/mlp/mnist_fl
 python scripts/run_experiment.py --config configs/experiments/mnist        # every yaml under a directory
 ```
 
+Benchmark suite (the comparison tables). `configs/benchmark/{suite,arms}.yaml`
+declare the models and the pruning arms; the generator crosses them:
+
+```bash
+python scripts/generate_benchmark_configs.py          # -> generated/ + manifests
+
+python scripts/run_manifest.py --resources small      # every small cell
+python scripts/run_manifest.py --resources small --tier headline
+python scripts/run_manifest.py --resources small --shard 3/16   # one share
+python scripts/run_sweep.py --config <one-config>     # a single cell
+
+bash scripts/submit_benchmark.sh --tier headline      # same, via SLURM
+
 Each run writes a fresh timestamped folder grouped by dataset:
 
 ```

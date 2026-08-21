@@ -61,41 +61,19 @@ python -c "import torch, src.pruning.methods" \
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export TOKENIZERS_PARALLELISM=false
 
-# ── which cells is this task responsible for? ───────────────────────────────
-CONFIGS=()
-if [[ "$TARGET" == *.yaml ]]; then
-    CONFIGS=("$TARGET")
-else
-    N="${SLURM_ARRAY_TASK_COUNT:-1}"
-    I="${SLURM_ARRAY_TASK_ID:-1}"
-    mapfile -t ALL < <(grep -v '^[[:space:]]*$' "$TARGET")
-    for ((k = I - 1; k < ${#ALL[@]}; k += N)); do
-        CONFIGS+=("${ALL[$k]}")
-    done
-    echo "task $I/$N of $TARGET: ${#CONFIGS[@]} of ${#ALL[@]} cells"
-fi
-
+# ── run this task's share ───────────────────────────────────────────────────
+# The loop itself lives in scripts/run_manifest.py, so a local run and a cluster
+# task execute identical code (and a subprocess per cell means an OOM kill costs
+# one cell, not the task). Striding is by --shard i/n.
 GRID="${GRID:-16}"
-FAILED=()
-START=$SECONDS
-for i in "${!CONFIGS[@]}"; do
-    CONFIG="${CONFIGS[$i]}"
-    echo ""
-    echo "=== [$((i + 1))/${#CONFIGS[@]}] $CONFIG  (t+$((SECONDS - START))s)"
-    if [[ ! -f "$CONFIG" ]]; then
-        echo "  no such config" >&2; FAILED+=("$CONFIG (missing)"); continue
-    fi
-    if python scripts/run_sweep.py --config "$CONFIG" --grid "$GRID" \
-            --out "$RESULTS_ROOT" ${SEED:+--seed "$SEED"}; then
-        echo "  ok"
-    else
-        echo "  FAILED (continuing)" >&2; FAILED+=("$CONFIG")
-    fi
-done
+ARGS=(--grid "$GRID" --out "$RESULTS_ROOT")
+[[ -n "${SEED:-}" ]] && ARGS+=(--seed "$SEED")
 
-echo ""
-echo "task done in $((SECONDS - START))s: $(( ${#CONFIGS[@]} - ${#FAILED[@]} ))/${#CONFIGS[@]} cells ok"
-if [[ ${#FAILED[@]} -gt 0 ]]; then
-    printf 'FAILED: %s\n' "${FAILED[@]}" >&2
-    exit 1
+if [[ "$TARGET" == *.yaml ]]; then
+    ARGS+=(--config "$TARGET")
+else
+    ARGS+=(--manifest "$TARGET"
+           --shard "${SLURM_ARRAY_TASK_ID:-1}/${SLURM_ARRAY_TASK_COUNT:-1}")
 fi
+
+python scripts/run_manifest.py "${ARGS[@]}"
