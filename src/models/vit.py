@@ -24,7 +24,7 @@ import torch
 import torch.nn as nn
 
 from src.data.registry import DatasetBundle
-from src.models.registry import PrunableModel, register_model
+from src.models.registry import MergeOp, PrunableModel, register_model
 from src.models.resnet import IMAGENET1K_CLASS_INDEX
 
 # (patch_size, num_layers, num_heads, hidden_dim, mlp_dim)
@@ -64,6 +64,16 @@ class ViT(PrunableModel):
 
     def outgoing_weights(self, idx: int) -> torch.Tensor:
         return self._mlp(idx)[3].weight.detach().t()  # [mlp_dim, d_model]
+
+    def merge_outgoing(self, idx: int, merges: list[MergeOp]) -> "ViT":
+        """Fold each removed MLP neuron's outgoing weights into its survivor --
+        mlp[3] reads the hidden dimension linearly, so this is one column
+        transfer, exactly as in any fully-connected layer."""
+        merged = copy.deepcopy(self)
+        W = merged._mlp(idx)[3].weight.data            # [d_model, mlp_dim]
+        for op in merges:
+            W[:, op.survivor] += op.scale * W[:, op.removed]
+        return merged
 
     def prune_layer(self, idx: int, indices_to_remove: list[int]) -> "ViT":
         """Remove hidden neurons of encoder block `idx`'s MLP: mlp[0] loses

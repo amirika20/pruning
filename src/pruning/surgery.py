@@ -16,7 +16,7 @@ import torch
 
 from src.config import PruningConfig
 from src.data.registry import DatasetBundle
-from src.models.registry import PrunableModel
+from src.models.registry import MergeOp, PrunableModel
 from src.pruning.geometry import layer_width
 from src.pruning.registry import PruneContext, PruneDecision, build_pruning_method
 
@@ -26,8 +26,13 @@ def apply_decision(
     layer_idx: int,
     decision: "list[int] | PruneDecision",
     already_removed: "set[int] | frozenset[int]" = frozenset(),
-) -> "tuple[PrunableModel, list[int]]":
-    """Apply one selection's surgery to `layer_idx` and return (model, selected).
+) -> "tuple[PrunableModel, list[int], list[MergeOp]]":
+    """Apply one selection's surgery and return (model, selected, applied_merges).
+
+    `applied_merges` is what was actually transferred, which is NOT always what
+    the method asked for -- ops touching a neuron an earlier method already
+    claimed get dropped. The report records the applied list, since that is what
+    the weights reflect.
 
     Neurons are NOT removed here -- that is a single prune_layer call once every
     method has had its say. What happens here is the weight surgery a method asks
@@ -47,7 +52,7 @@ def apply_decision(
     """
     selected: list[int]
     if not isinstance(decision, PruneDecision):
-        return model, [i for i in decision if i not in already_removed]
+        return model, [i for i in decision if i not in already_removed], []
 
     selected = [i for i in decision.remove if i not in already_removed]
     selected_set = set(selected)
@@ -73,7 +78,7 @@ def apply_decision(
         model = model.add_outgoing_bias(layer_idx, decision.bias_delta)
     if decision.new_outgoing is not None:
         model = model.set_outgoing_weights(layer_idx, decision.new_outgoing)
-    return model, selected
+    return model, selected, ops
 
 
 def prune_model(
@@ -113,15 +118,15 @@ def prune_model(
                 already_selected=set(to_remove),
             )
             decision = method.select(current, layer_idx, ctx)
-            current, selected = apply_decision(current, layer_idx, decision,
-                                               already_removed=to_remove)
+            current, selected, applied = apply_decision(
+                current, layer_idx, decision, already_removed=to_remove)
             per_method[kind] = len(selected)
             removed_by[kind] = sorted(int(i) for i in selected)
             if isinstance(decision, PruneDecision):
-                if decision.merges:
+                if applied:
                     merge_ops[kind] = [
                         {"removed": int(op.removed), "survivor": int(op.survivor),
-                         "scale": float(op.scale)} for op in ops
+                         "scale": float(op.scale)} for op in applied
                     ]
                 if decision.diagnostics:
                     diagnostics[kind] = decision.diagnostics

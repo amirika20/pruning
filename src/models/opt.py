@@ -21,7 +21,7 @@ import torch
 import torch.nn as nn
 
 from src.data.registry import DatasetBundle
-from src.models.registry import PrunableModel, register_model
+from src.models.registry import MergeOp, PrunableModel, register_model
 
 OPT_SIZES = {"125m": "facebook/opt-125m", "350m": "facebook/opt-350m", "1.3b": "facebook/opt-1.3b"}
 
@@ -55,6 +55,20 @@ class OPT(PrunableModel):
 
     def outgoing_weights(self, idx: int) -> torch.Tensor:
         return self._layer(idx).fc2.weight.detach().t()  # [ffn_dim, d_model]
+
+    def merge_outgoing(self, idx: int, merges: list[MergeOp]) -> "OPT":
+        """Fold each removed FFN neuron's outgoing weights into its survivor.
+
+        fc2 reads the FFN hidden dimension linearly, so a neuron's outgoing
+        weights are one column of fc2.weight -- the same transfer as any
+        fully-connected layer. Needed by the merge-with-transfer methods
+        (data_free_merge, leo_pp); without it they refuse the model.
+        """
+        merged = copy.deepcopy(self)
+        W = merged._layer(idx).fc2.weight.data          # [d_model, ffn_dim]
+        for op in merges:
+            W[:, op.survivor] += op.scale * W[:, op.removed]
+        return merged
 
     def prune_layer(self, idx: int, indices_to_remove: list[int]) -> "OPT":
         """Remove FFN hidden neurons of decoder layer `idx`: fc1 loses output

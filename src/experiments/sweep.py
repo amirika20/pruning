@@ -163,7 +163,7 @@ def sweep_widths(
                 if n_calib is not None and "n_calib" in _accepted_params(cls):
                     wp.setdefault("n_calib", n_calib)
                 decision = build_pruning_method(kind, **wp).select(current, li, ctx)
-            current, selected = apply_decision(current, li, decision)
+            current, selected, _ = apply_decision(current, li, decision)
             if selected:
                 current = current.prune_layer(li, sorted(selected))
         solve_seconds = time.perf_counter() - t0
