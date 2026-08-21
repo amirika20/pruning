@@ -102,8 +102,7 @@ from src.pruning.registry import (
 # MASH owns the canonical unit extraction (BN folding, the unit-gain gauge) and
 # the rectified-Gaussian Grams; importing keeps one implementation of each.
 from src.pruning.methods.mash import (
-    TINY, UnitMoments, _layer_inputs, _relu_moments, consumer_has_bias,
-    extract_units)
+    TINY, _layer_inputs, extract_units, repair_deletion, reshape_outgoing)
 
 CRITERIA = ("interval", "margin", "empirical")
 REPAIRS = ("kernel", "empirical", "bias_only", "none")
@@ -250,63 +249,11 @@ class SaturatedPruning(PruningMethod):
 
     def _repair_columns(self, model, layer_idx, ctx, keep: np.ndarray,
                         removed: np.ndarray):
-        """(new_outgoing [H, m] or None, bias_delta [m] or None).
-
-        Solves the constant-augmented normal equations for the survivors'
-        effective-weight adjustments, so the removed units' affine contribution
-        is absorbed as far as the surviving span allows and the leftover
-        constant lands in the consumer's bias exactly.
-        """
-        units, ok = extract_units(model, layer_idx)
-        V = units.V
-        C_new = units.C.copy()
-        if len(removed) == 0:
-            return None, None
-
-        Z = _layer_inputs(model, layer_idx, ctx.train_inputs[: self.n_calib],
-                          max_rows=self.max_rows)
-        if self.repair == "empirical":
-            Phi = np.maximum(Z @ units.u.T - units.rho[None, :], 0.0)
-            N = len(Z)
-            G = Phi[:, keep].T @ Phi[:, keep] / N
-            g1 = Phi[:, keep].mean(axis=0)
-            B = Phi[:, keep].T @ Phi[:, removed] / N
-            b1 = Phi[:, removed].mean(axis=0)
-        else:
-            mu, Sigma = Z.mean(axis=0), np.atleast_2d(np.cov(Z.T))
-            mk = UnitMoments(units.u[keep], units.rho[keep], mu, Sigma)
-            mr = UnitMoments(units.u[removed], units.rho[removed], mu, Sigma)
-            G = mk.gram_with(mk)
-            B = mk.gram_with(mr)
-            g1 = _relu_moments(mk.m, mk.s)
-            b1 = _relu_moments(mr.m, mr.s)
-
-        # Adjoin the constant function: [[G, g1], [g1^T, 1]]. Only when the
-        # consumer can actually hold a constant -- otherwise solve the plain
-        # system, so the columns are optimal for the network we can build.
-        K = len(keep)
-        use_const = consumer_has_bias(model, layer_idx)
-        n = K + 1 if use_const else K
-        A = np.empty((n, n))
-        A[:K, :K] = G
-        rhs = np.empty((n, len(removed)))
-        rhs[:K] = B
-        if use_const:
-            A[:K, K] = g1
-            A[K, :K] = g1
-            A[K, K] = 1.0
-            rhs[K] = b1
-        lam = 1e-8 * max(np.trace(A) / n, TINY)
-        sol = np.linalg.solve(A + lam * np.eye(n), rhs)          # [n, |R|]
-
-        X = sol[:K] @ V[removed]                        # [K, m] effective weights
-        const = sol[K] @ V[removed] if use_const else None
-        if self.repair == "bias_only":
-            X = np.zeros_like(X)
-            const = (b1 @ V[removed]) if use_const else None
-        safe_alpha = np.where(units.alpha[keep] > TINY, units.alpha[keep], 1.0)
-        C_new[keep] = units.C[keep] + X / safe_alpha[:, None]
-        return C_new, const
+        """(new_outgoing [H, ...] or None, bias_delta or None) -- the shared
+        delete-and-resolve solve; `keep` is implied by `removed`."""
+        return repair_deletion(model, layer_idx,
+                               ctx.train_inputs[: self.n_calib], removed,
+                               repair=self.repair, max_rows=self.max_rows)
 
     # -- selection ---------------------------------------------------------
 
@@ -381,12 +328,8 @@ class SaturatedPruning(PruningMethod):
             C_new, const = self._repair_columns(model, layer_idx, ctx, keep,
                                                 rm_always)
             if C_new is not None:
-                ow = model.outgoing_weights(layer_idx)
-                if ow.shape[0] != C_new.shape[0]:
-                    # conv consumer: outgoing_weights is [H*kk, fan_out] while
-                    # the columns are carried as [H, kk*fan_out]
-                    C_new = C_new.reshape(ow.shape[0], ow.shape[1])
-                dec.new_outgoing = torch.from_numpy(np.ascontiguousarray(C_new))
+                dec.new_outgoing = torch.from_numpy(
+                    reshape_outgoing(model, layer_idx, C_new))
             if const is not None:
                 dec.bias_delta = torch.from_numpy(const)
         return dec

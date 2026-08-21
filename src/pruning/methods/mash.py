@@ -79,6 +79,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Sequence
 
 import numpy as np
 import torch
@@ -639,6 +640,96 @@ def realize(units: Units, ok: np.ndarray, clusters: list[list[int]],
     return rows, biases, cols, keep, delta
 
 
+def reshape_outgoing(model: PrunableModel, layer_idx: int,
+                     C: np.ndarray) -> np.ndarray:
+    """Put a [H, ...] column matrix into the layout set_outgoing_weights wants.
+
+    A conv consumer reads each channel through kH*kW taps, so outgoing_weights
+    is [H*kk, fan_out] while we carry the flattened block per channel as
+    [H, kk*fan_out]. For a Linear consumer this is the identity.
+    """
+    ow = model.outgoing_weights(layer_idx)
+    if ow.shape[0] == C.shape[0]:
+        return np.ascontiguousarray(C)
+    return np.ascontiguousarray(C.reshape(ow.shape[0], ow.shape[1]))
+
+
+def repair_deletion(model: PrunableModel, layer_idx: int, x: torch.Tensor,
+                    removed: Sequence[int], repair: str = "kernel",
+                    max_rows: int = 20000
+                    ) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Re-solve the surviving consumer columns after deleting `removed`.
+
+    (new_outgoing in the ORIGINAL gauge [H, ...], bias_delta or None). Least
+    squares over the survivors' responses, with the constant function adjoined
+    when the consumer can hold one -- so the removed units' contribution is
+    absorbed as far as the surviving span allows and the leftover constant is
+    exact rather than applied afterwards. This is the shared primitive behind
+    every delete-and-repair method here; merging has its own path, since it
+    also has to emit a hyperplane.
+    """
+    if repair == "none" or len(removed) == 0:
+        return None, None
+    if repair not in ("kernel", "empirical", "bias_only"):
+        raise ValueError("repair for deletion must be one of 'kernel', "
+                         f"'empirical', 'bias_only', 'none'; got {repair!r}")
+    if (isinstance(model.prunable_layer(layer_idx), nn.Conv2d)
+            and repair == "kernel"):
+        raise NotImplementedError(
+            "repair='kernel' evaluates its Grams in closed form under a "
+            "Gaussian over the layer's inputs, which on conv means a "
+            "patch-space covariance -- expensive and misspecified for patches. "
+            "Use repair='empirical'.")
+
+    units, _ = extract_units(model, layer_idx)
+    H = len(units.rho)
+    removed = np.asarray(sorted(int(i) for i in removed), dtype=int)
+    keep = np.setdiff1d(np.arange(H), removed)
+    if len(keep) == 0:
+        return None, None
+    V = units.V
+    C_new = units.C.copy()
+
+    Z = _layer_inputs(model, layer_idx, x, max_rows=max_rows)
+    if repair in ("empirical", "bias_only"):
+        Phi = np.maximum(Z @ units.u.T - units.rho[None, :], 0.0)
+        N = len(Z)
+        G = Phi[:, keep].T @ Phi[:, keep] / N
+        g1 = Phi[:, keep].mean(axis=0)
+        B = Phi[:, keep].T @ Phi[:, removed] / N
+        b1 = Phi[:, removed].mean(axis=0)
+    else:
+        mu, Sigma = Z.mean(axis=0), np.atleast_2d(np.cov(Z.T))
+        mk = UnitMoments(units.u[keep], units.rho[keep], mu, Sigma)
+        mr = UnitMoments(units.u[removed], units.rho[removed], mu, Sigma)
+        G, B = mk.gram_with(mk), mk.gram_with(mr)
+        g1, b1 = _relu_moments(mk.m, mk.s), _relu_moments(mr.m, mr.s)
+
+    K = len(keep)
+    use_const = consumer_has_bias(model, layer_idx)
+    n = K + 1 if use_const else K
+    A = np.empty((n, n))
+    A[:K, :K] = G
+    rhs = np.empty((n, len(removed)))
+    rhs[:K] = B
+    if use_const:
+        A[:K, K] = g1
+        A[K, :K] = g1
+        A[K, K] = 1.0
+        rhs[K] = b1
+    lam = 1e-8 * max(np.trace(A) / n, TINY)
+    sol = np.linalg.solve(A + lam * np.eye(n), rhs)
+
+    X = sol[:K] @ V[removed]
+    const = sol[K] @ V[removed] if use_const else None
+    if repair == "bias_only":
+        X = np.zeros_like(X)
+        const = (b1 @ V[removed]) if use_const else None
+    safe_alpha = np.where(units.alpha[keep] > TINY, units.alpha[keep], 1.0)
+    C_new[keep] = units.C[keep] + X / safe_alpha[:, None]
+    return C_new, const
+
+
 # ── the pruning methods ──────────────────────────────────────────────────────
 
 def consumer_has_bias(model: PrunableModel, layer_idx: int) -> bool:
@@ -892,14 +983,11 @@ class _MashBase(PruningMethod):
         # outgoing_weights is [H*kk, fan_out] while we carry [H, kk*fan_out].
         # The internal layout is that flattened block per channel, so a reshape
         # restores what set_outgoing_weights expects.
-        ow = model.outgoing_weights(layer_idx)
-        C_out = C_new
-        if ow.shape[0] != H:
-            C_out = C_new.reshape(ow.shape[0], ow.shape[1])
+        C_out = reshape_outgoing(model, layer_idx, C_new)
 
         dec = PruneDecision(
             remove=sorted(remove),
-            new_outgoing=torch.from_numpy(np.ascontiguousarray(C_out)),
+            new_outgoing=torch.from_numpy(C_out),
             diagnostics=self._diagnostics(units, H, clusters, keep, recs or [],
                                           idx_map, cert))
         if rewrite_incoming:
