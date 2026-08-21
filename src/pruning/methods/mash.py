@@ -304,6 +304,11 @@ class MashEngine:
         self.measure = measure
         if score == "cylinder":
             self._radius = float(radius)
+            # Ward on the cylinder admits the Lance--Williams recursion, so the
+            # per-step update is O(K) with no d-dimensional work. Only the
+            # initial matrix needs the embedding, and that is one BLAS product
+            # rather than H recomputations of the same codes.
+            self._lw = True
         elif measure == "empirical":
             # Exact under the empirical measure and free of any d x d
             # covariance: keep the projections Z g^T, which are ADDITIVE under
@@ -443,10 +448,20 @@ class MashEngine:
 
     def _all_costs(self) -> np.ndarray:
         H = self.n_orig
-        cost = np.full((H, H), np.inf)
         allidx = np.arange(H)
-        for k in range(H):
-            cost[k, allidx] = self._pair_costs(k, allidx)
+        if self.score == "cylinder":
+            # ||p_i - p_j||^2 from the Gram, so the whole matrix is one matmul
+            u, off = self._code(allidx, "centroid")
+            P = np.concatenate([self._radius * u, off[:, None]], axis=1)
+            sq = (P * P).sum(axis=1)
+            d2 = np.maximum(sq[:, None] + sq[None, :] - 2.0 * (P @ P.T), 0.0)
+            den = self.A[:, None] + self.A[None, :]
+            w = np.where(den > TINY, np.outer(self.A, self.A) / np.maximum(den, TINY), 0.0)
+            cost = w * d2
+        else:
+            cost = np.full((H, H), np.inf)
+            for k in range(H):
+                cost[k, allidx] = self._pair_costs(k, allidx)
         cost[allidx, allidx] = np.inf
         return cost
 
@@ -474,6 +489,12 @@ class MashEngine:
         k, l = int(min(k, l)), int(max(k, l))
         cost = float(self._cost[k, l])
         self.cum_cost += cost
+        # Lance--Williams needs the PRE-merge masses and cost rows
+        lw = getattr(self, "_lw", False)
+        if lw:
+            A_k_old, A_l_old = float(self.A[k]), float(self.A[l])
+            row_k_old = self._cost[k].copy()
+            row_l_old = self._cost[l].copy()
 
         self.members[k].extend(self.members[l])
         self.A[k] += self.A[l]
@@ -506,7 +527,16 @@ class MashEngine:
 
         others = np.flatnonzero(self.active)
         others = others[others != k]
-        new = self._pair_costs(k, others)
+        if lw:
+            # Ward's Lance--Williams update, in the mass-weighted form:
+            #   D(k u l, o) = [(A_k+A_o)D(k,o) + (A_l+A_o)D(l,o) - A_o D(k,l)]
+            #                 / (A_k + A_l + A_o)
+            A_o = self.A[others]
+            new = ((A_k_old + A_o) * row_k_old[others]
+                   + (A_l_old + A_o) * row_l_old[others]
+                   - A_o * cost) / (A_k_old + A_l_old + A_o)
+        else:
+            new = self._pair_costs(k, others)
         self._cost[k, :] = np.inf
         self._cost[:, k] = np.inf
         self._cost[k, others] = new
@@ -855,7 +885,8 @@ class _MashBase(PruningMethod):
 
     # -- setup ------------------------------------------------------------
 
-    def _prepare(self, model: PrunableModel, layer_idx: int, ctx: PruneContext):
+    def _prepare(self, model: PrunableModel, layer_idx: int, ctx: PruneContext,
+                 for_scoring: bool = True):
         layer = model.prunable_layer(layer_idx)
         is_conv = isinstance(layer, nn.Conv2d)
         if not isinstance(layer, (nn.Linear, nn.Conv2d)):
@@ -912,17 +943,30 @@ class _MashBase(PruningMethod):
                 "conv study, misspecified. Use repair='empirical' (the same "
                 "normal equations from sample averages) or 'sum'.")
 
-        Z = _layer_inputs(model, layer_idx, ctx.train_inputs[: self.n_calib],
-                          max_rows=self.max_rows)
-        mu = Z.mean(axis=0)
-        Sigma = None
-        if measure == "gaussian" or self.repair in ("kernel", "projection") \
-                or self.bias_fix:
-            Sigma = np.atleast_2d(np.cov(Z.T))
-        x0 = (Z.min(axis=0) + Z.max(axis=0)) / 2.0
-        half = (Z.max(axis=0) - Z.min(axis=0)) / 2.0
-        R = float(np.linalg.norm(half))
-        rad = R if self.radius == "sup" else R / np.sqrt(Z.shape[1] + 2.0)
+        # Only pay for what this call actually consumes. `for_scoring=False`
+        # means the partition is already known (a cached plan is being cut), so
+        # the box and the score's moments are not needed -- and the sum rule
+        # needs no data at all, which is what makes cutting the certified tier
+        # at another width nearly free.
+        needs_sigma = ((for_scoring and self.score != "cylinder"
+                        and measure == "gaussian")
+                       or self.repair in ("kernel", "projection")
+                       or self.bias_fix)
+        needs_Z = (for_scoring or needs_sigma
+                   or self.repair in ("empirical", "projection"))
+        Z = mu = Sigma = None
+        d = units.u.shape[1]
+        x0, R, rad = np.zeros(d), 0.0, 0.0
+        if needs_Z:
+            Z = _layer_inputs(model, layer_idx, ctx.train_inputs[: self.n_calib],
+                              max_rows=self.max_rows)
+            mu = Z.mean(axis=0)
+            if needs_sigma:
+                Sigma = np.atleast_2d(np.cov(Z.T))
+            x0 = (Z.min(axis=0) + Z.max(axis=0)) / 2.0
+            half = (Z.max(axis=0) - Z.min(axis=0)) / 2.0
+            R = float(np.linalg.norm(half))
+            rad = R if self.radius == "sup" else R / np.sqrt(d + 2.0)
         return (units, ok, idx_map, frozen, sub, Z, mu, Sigma, x0, R, rad,
                 measure)
 
@@ -1057,7 +1101,8 @@ class _MashBase(PruningMethod):
         layer's input space even though its output units are untouched.
         """
         (units, ok, idx_map, frozen, sub, Z, mu, Sigma,
-         x0, R, rad, measure) = self._prepare(model, layer_idx, ctx)
+         x0, R, rad, measure) = self._prepare(model, layer_idx, ctx,
+                                              for_scoring=False)
         if len(idx_map) != plan.n_mergeable or not np.array_equal(idx_map, plan.idx_map):
             # A unit's norm collapsed to zero since planning, so the index
             # mapping no longer lines up. Re-plan rather than mis-apply it.
@@ -1289,6 +1334,24 @@ def _selftest() -> None:  # pragma: no cover
         else:
             raise AssertionError(f"expected ValueError for {bad}")
 
+    # 9b. The Lance--Williams update must agree EXACTLY with recomputing the
+    # Ward increment from the centroids -- it is the reason the cylinder score
+    # costs O(K) per step instead of O(K d), so a silent drift here would be a
+    # silently different method.
+    eng_lw = MashEngine(units, score="cylinder", x0=x0, radius=R)
+    worst = 0.0
+    for _ in range(H - 2):
+        eng_lw.step()
+        act = np.flatnonzero(eng_lw.active)
+        for kk in act:
+            oth = act[act != kk]
+            if not len(oth):
+                continue
+            direct = eng_lw._pair_costs(int(kk), oth)
+            rel = np.abs(eng_lw._cost[kk, oth] - direct) / np.maximum(np.abs(direct), 1e-12)
+            worst = max(worst, float(rel.max()))
+    assert worst < 1e-9, f"Lance-Williams disagrees with direct Ward, {worst:.2e}"
+
     # 10. Conv + BatchNorm end to end. The merged dictionary is refused here on
     # purpose (a folded hyperplane cannot be written back through the BN), the
     # medoid dictionary must work, and zero removals must be bit-exact.
@@ -1353,6 +1416,7 @@ def _selftest() -> None:  # pragma: no cover
     print("  certificate bounds the realized sup error on the box")
     print("  repair ordering global <= projection <= sum (and empirical <= sum)")
     print("  registry round-trip for mash / mash_certified + param validation")
+    print(f"  Lance-Williams update == direct Ward increment ({worst:.1e})")
     print("  conv+BN: patch extraction, medoid path, bit-exact zero removal,")
     print("    BN mode preserved, merge-under-BN refused with a pointer")
 
