@@ -31,6 +31,7 @@ import torch
 from src.analysis.metrics import print_efficiency_report
 from src.analysis.plots import plot_aggregate_curves, plot_pruning_summary
 from src.analysis.geometry_shift import format_geometry_shift, geometry_shift
+from src.analysis.similarity import format_similarity, similarity_table
 from src.analysis.pruning_detail import (
     format_pruning_detail, layer_table, unit_table)
 from src.analysis.report import format_report
@@ -176,15 +177,24 @@ def run_single_seed(config: ExperimentConfig, seed: int, device: torch.device, d
     metrics_pruned = print_efficiency_report(model_before, model_pruned, label="pruned")
     logging.info("\n" + format_pruning_detail(pruning_per_layer, config.name))
 
-    geom = None
+    geom = simil = None
     if config.analyze_geometry:
+        gx = bundle.val_ds.tensors[0][:256].to(device)
         try:
-            gx = bundle.val_ds.tensors[0][:256].to(device)
             geom = geometry_shift(model_before, model_pruned, pruning_per_layer,
                                   gx, seed=seed, name=config.name)
             logging.info("\n" + format_geometry_shift(geom))
         except Exception as exc:
             logging.warning(f"geometry analysis skipped: {exc}")
+        try:
+            # K is read off the PRE-prune model: it is the structure the method
+            # had available, and the removed-pair columns score its choices
+            # against it.
+            simil = similarity_table(model_before, gx, pruning_per_layer,
+                                     seed=seed, name=config.name)
+            logging.info("\n" + format_similarity(simil))
+        except Exception as exc:
+            logging.warning(f"similarity analysis skipped: {exc}")
 
     # --- Fine-tune (finetune.epochs == 0 skips the phase entirely, e.g. to
     # reproduce retraining-free protocols like Srinivas & Babu 2015) ---
@@ -252,8 +262,9 @@ def run_single_seed(config: ExperimentConfig, seed: int, device: torch.device, d
         },
         "fingerprints": fingerprints,
         "pruning_per_layer": pruning_per_layer,
-        # DataFrame, stripped before results.json is written (see run_experiment)
+        # DataFrames, stripped before results.json is written (run_experiment)
         "_geometry": geom,
+        "_similarity": simil,
         "pruned": metrics_pruned,
         "finetuned": metrics_finetuned,
     }
@@ -292,6 +303,7 @@ def run_experiment(config: ExperimentConfig) -> Path:
         # The geometry table is a DataFrame, so lift it out before results.json
         # is serialized; it gets its own CSV below.
         geom_df = result.pop("_geometry", None)
+        simil_df = result.pop("_similarity", None)
         save_json(result, s_dir / "results.json")
         (s_dir / "report.txt").write_text(format_report(config, [result], title_suffix=f" (seed {seed})"))
         # Tidy tables for ablation: one row per unit and one per layer, so a
@@ -308,6 +320,9 @@ def run_experiment(config: ExperimentConfig) -> Path:
                 geom_df.to_csv(s_dir / "geometry_shift.csv", index=False)
                 (s_dir / "geometry_shift.txt").write_text(
                     format_geometry_shift(geom_df))
+            if simil_df is not None and len(simil_df):
+                simil_df.to_csv(s_dir / "similarity.csv", index=False)
+                (s_dir / "similarity.txt").write_text(format_similarity(simil_df))
         except Exception as exc:
             logging.warning(f"could not write pruning tables: {exc}")
 
