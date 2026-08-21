@@ -731,6 +731,31 @@ def reshape_outgoing(model: PrunableModel, layer_idx: int,
     return np.ascontiguousarray(C.reshape(ow.shape[0], ow.shape[1]))
 
 
+def fold_constant(model: PrunableModel, layer_idx: int,
+                  const: np.ndarray) -> np.ndarray:
+    """Reduce a per-COLUMN constant to the consumer's bias shape.
+
+    A unit owns k columns of its consumer (kH*kW across a conv hop, the spatial
+    count across a flatten, 1 for a plain Linear), and the constant is solved
+    per column. Replacing the unit's response by a constant therefore adds
+    sum_t w[t, o] * c to output o, i.e. the per-column vector summed over that
+    unit's block -- which is exact for a Linear or a flatten, and the interior
+    answer for a padded conv, where border positions see fewer taps.
+
+    Without this the delta is k times too long and `add_outgoing_bias` raises;
+    LeNet is what surfaced it, being the first entry whose conv units feed a
+    multi-column consumer while `bias_fix`/`bias_only` is in play.
+    """
+    fan_out = model.outgoing_weights(layer_idx).shape[1]
+    if const.shape[0] == fan_out:
+        return const
+    if const.shape[0] % fan_out:
+        raise ValueError(
+            f"constant of length {const.shape[0]} is not a whole number of "
+            f"consumer columns (fan_out {fan_out}) for layer {layer_idx}")
+    return const.reshape(-1, fan_out).sum(axis=0)
+
+
 def repair_deletion(model: PrunableModel, layer_idx: int, x: torch.Tensor,
                     removed: Sequence[int], repair: str = "kernel",
                     max_rows: int = 20000
@@ -804,6 +829,8 @@ def repair_deletion(model: PrunableModel, layer_idx: int, x: torch.Tensor,
         const = (b1 @ V[removed]) if use_const else None
     safe_alpha = np.where(units.alpha[keep] > TINY, units.alpha[keep], 1.0)
     C_new[keep] = units.C[keep] + X / safe_alpha[:, None]
+    if const is not None:
+        const = fold_constant(model, layer_idx, const)
     return C_new, const
 
 
@@ -1119,7 +1146,8 @@ class _MashBase(PruningMethod):
             W_t = torch.from_numpy(W_new).view_as(layer.weight)
             dec.new_incoming = (W_t, torch.from_numpy(b_new))
         if delta is not None:
-            dec.bias_delta = torch.from_numpy(delta)
+            dec.bias_delta = torch.from_numpy(
+                fold_constant(model, layer_idx, delta))
         return dec
 
 

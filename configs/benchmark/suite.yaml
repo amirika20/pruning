@@ -46,13 +46,22 @@ entries:
     model: {kind: mlp, params: {hidden_sizes: [512, 256, 128]}}
     training: {optimizer: adam, epochs: 60, lr: 1.0e-3, batch_size: 128, weight_decay: 1.0e-4}
 
-  - name: mnist_cnn
+  # LeNet-5 with the LeNet-5-Caffe widths (20/50 conv, 800/500 fc) that the
+  # pruning literature uses -- the stock 6/16/120/84 is close to minimal, so
+  # capacity on it would be pessimistic for reasons that have nothing to do with
+  # the method. `family: mixed`: two conv slots and two fully-connected ones, so
+  # only arms that work on both are generated (see arms.yaml).
+  #
+  # NO BATCHNORM, and that is why it is here. BN standardizes the pre-activation
+  # so nothing saturates, and the `saturated` arms correctly find nothing on
+  # every BN entry in this suite. LeNet is where they have something to do.
+  - name: mnist_lenet
     arms_tier: all
-    family: conv
+    family: mixed
     resources: small
     train: true
     data: {kind: mnist, params: {flatten: false, n_samples: 10000, train_ratio: 0.8}}
-    model: {kind: cnn, params: {hidden_sizes: [32, 64, 128], input_channels: 1}}
+    model: {kind: lenet, params: {conv_channels: [20, 50], hidden_sizes: [800, 500]}}
     training: {optimizer: adam, epochs: 40, lr: 1.0e-3, batch_size: 128, weight_decay: 1.0e-4}
 
   - name: modular_transformer

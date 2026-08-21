@@ -178,9 +178,13 @@ def main() -> None:
                 continue
             if tier == "ablation" and arm["tier"] == "headline":
                 continue
-            if arm.get("requires") == "fc" and entry.get("family") != "fc":
-                skipped[f"{arm['name']} (fc-only) on conv"] = \
-                    skipped.get(f"{arm['name']} (fc-only) on conv", 0) + 1
+            fam = entry.get("family")
+            if arm.get("requires") == "fc" and fam != "fc":
+                # `mixed` (LeNet: conv slots AND fc slots) is treated like conv:
+                # an fc-only arm would raise on the conv slots, and prune_model
+                # applies one method to every layer. Conservative on purpose.
+                key = f"{arm['name']} (fc-only) on {fam}"
+                skipped[key] = skipped.get(key, 0) + 1
                 continue
             seeds = overrides.get(entry["name"], defaults.get("seeds", [0]))
             try:
