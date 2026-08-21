@@ -30,6 +30,7 @@ import torch
 
 from src.analysis.metrics import print_efficiency_report
 from src.analysis.plots import plot_aggregate_curves, plot_pruning_summary
+from src.analysis.geometry_shift import format_geometry_shift, geometry_shift
 from src.analysis.pruning_detail import (
     format_pruning_detail, layer_table, unit_table)
 from src.analysis.report import format_report
@@ -175,6 +176,16 @@ def run_single_seed(config: ExperimentConfig, seed: int, device: torch.device, d
     metrics_pruned = print_efficiency_report(model_before, model_pruned, label="pruned")
     logging.info("\n" + format_pruning_detail(pruning_per_layer, config.name))
 
+    geom = None
+    if config.analyze_geometry:
+        try:
+            gx = bundle.val_ds.tensors[0][:256].to(device)
+            geom = geometry_shift(model_before, model_pruned, pruning_per_layer,
+                                  gx, seed=seed, name=config.name)
+            logging.info("\n" + format_geometry_shift(geom))
+        except Exception as exc:
+            logging.warning(f"geometry analysis skipped: {exc}")
+
     # --- Fine-tune (finetune.epochs == 0 skips the phase entirely, e.g. to
     # reproduce retraining-free protocols like Srinivas & Babu 2015) ---
     skip_finetune = config.finetune.epochs <= 0
@@ -241,6 +252,8 @@ def run_single_seed(config: ExperimentConfig, seed: int, device: torch.device, d
         },
         "fingerprints": fingerprints,
         "pruning_per_layer": pruning_per_layer,
+        # DataFrame, stripped before results.json is written (see run_experiment)
+        "_geometry": geom,
         "pruned": metrics_pruned,
         "finetuned": metrics_finetuned,
     }
@@ -276,6 +289,9 @@ def run_experiment(config: ExperimentConfig) -> Path:
         # Persist before any plotting: training time must never hinge on
         # cosmetic code being exception-free.
         s_dir = exp_dir / "seeds" / f"seed_{seed}"
+        # The geometry table is a DataFrame, so lift it out before results.json
+        # is serialized; it gets its own CSV below.
+        geom_df = result.pop("_geometry", None)
         save_json(result, s_dir / "results.json")
         (s_dir / "report.txt").write_text(format_report(config, [result], title_suffix=f" (seed {seed})"))
         # Tidy tables for ablation: one row per unit and one per layer, so a
@@ -288,6 +304,10 @@ def run_experiment(config: ExperimentConfig) -> Path:
                 s_dir / "layers.csv", index=False)
             (s_dir / "pruning_detail.txt").write_text(
                 format_pruning_detail(rep, f"{config.name} seed {seed}"))
+            if geom_df is not None and len(geom_df):
+                geom_df.to_csv(s_dir / "geometry_shift.csv", index=False)
+                (s_dir / "geometry_shift.txt").write_text(
+                    format_geometry_shift(geom_df))
         except Exception as exc:
             logging.warning(f"could not write pruning tables: {exc}")
 

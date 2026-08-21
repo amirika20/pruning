@@ -101,6 +101,11 @@ class ExperimentConfig:
     # place (see src.reproducibility). Turn off only to trade reproducibility
     # for throughput.
     deterministic: bool = True
+    # Run the exploratory before/after geometry battery (participation ratio,
+    # principal-subspace alignment, response-space effective dimension and the
+    # captured fraction) and write geometry_shift.csv per seed. A couple of
+    # forward passes plus SVDs -- turn off for very wide models.
+    analyze_geometry: bool = True
     output_root: str = "outputs"
     notes: str = ""
 
