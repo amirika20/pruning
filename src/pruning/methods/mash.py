@@ -1,0 +1,930 @@
+"""MASH -- Mass-weighted Aggregation of Structured Hyperplanes.
+
+Our merge-based structured pruning. A ReLU unit h(x) = sigma(w^T x + b) with
+w != 0 is written canonically as h(x) = alpha * sigma(u^T x - rho) with
+
+    alpha = ||w||          gain
+    u     = w / ||w||      orientation (unit vector)
+    rho   = -b / ||w||     SIGNED offset; the boundary is {x : u^T x = rho}
+    c                      outgoing column (the consumer's column for the unit)
+    v     = alpha * c      effective outgoing weight
+    a     = ||v||          the unit's MASS
+
+The network is unchanged by (w, b, c) -> (t w, t b, c / t) for t > 0, so alpha
+is not identifiable alone: the gauge-invariant data are the geometric code
+q = [u; rho] and the mass a. Every score here depends on (q, a) only.
+
+MERGING is addition of mass-weighted covectors. A cluster C carries the triple
+
+    g_C = sum_C a_i u_i,   r_C = sum_C a_i rho_i,   A_C = sum_C a_i (its mass)
+
+plus w_C = sum_C v_i. All four are ADDITIVE, so merging is associative and the
+dendrogram does not depend on the order a cluster was assembled. The realized
+unit normalizes only at emission:
+
+    ubar = g_C / ||g_C||,   rhobar = r_C / ||g_C||,   eta_C = ||g_C|| / A_C
+
+With `gauge_correct` (default) the emitted column is eta_C * w_C, which makes
+the merged unit realize the mass-weighted MEAN pre-activation -- the optimal
+affine surrogate. Without it the plain sum w_C is emitted, which overshoots the
+slope by 1/eta_C; that variant is kept because the recorded studies used it.
+
+SCORES (`score=`), all in mass-weighted Ward form  A_k A_l / (A_k + A_l) * d^2:
+
+    cylinder      d^2 on the covector cylinder, [radius * u ; u^T x0 - rho],
+                  evaluated at cluster CENTROIDS. Pre-ReLU and domain-only:
+                  needs the input box, never activations.
+    delta_f       d^2 = ||phi_k - phi_l||^2 between the units' POST-ReLU
+                  unit-gain responses under N(mu, Sigma). Data-light.
+    exact_damage  the exact expected squared layer-output error of the merge,
+                  including the merged unit's own response and the outgoing
+                  Gram <w_k, w_l>. Also data-light, strictly more work than
+                  delta_f -- kept for ablation, since the two agree closely in
+                  practice (the fan-out term contributes very little).
+
+`cylinder` is pre-ReLU by construction, and no metric on the boundary geometry
+can know what the ReLU clips -- that needs the measure. This is why the
+domain-only tier is a CERTIFICATE tier rather than a capacity tier.
+
+DICTIONARY (`dictionary=`): `merge` emits the new mass-weighted hyperplane;
+`medoid` keeps each cluster's heaviest ORIGINAL unit and lets the repair absorb
+the rest. Only `merge` synthesizes a hyperplane, so only `merge` requires that
+the layer have no paired BatchNorm (see `select`).
+
+REPAIR (`repair=`) of the surviving consumer columns:
+
+    sum         emit the accumulated column; no reference to any measure
+    projection  per-cluster rank-1 least squares (each column optimal, but
+                clusters stay independent)
+    kernel      global least squares, G Chat = B C, with G and B closed-form
+                kernel evaluations under N(mu, Sigma) -- no activations
+    empirical   the same normal equations with G, B as sample averages over
+                the calibration activations
+
+Repair strictly dominates in that order (nested feasible sets), and it is the
+largest single effect in the pipeline. Note that once the repair is global
+(`kernel`/`empirical`) it depends on the survivors only through the SUBSPACE
+they span, so the score and dictionary choices matter much less than they do
+under `sum`.
+
+Two entries are registered. `mash` takes a width (`n_remove`); `mash_certified`
+is the domain-only tier and instead takes a tolerance, choosing its own width
+as the last cut whose certificate stays inside the budget.
+
+Run `python -c "from src.pruning.methods.mash import _selftest; _selftest()"`
+for the numerical self-tests.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+import torch
+import torch.nn as nn
+from scipy.special import ndtr, owens_t
+
+from src.models.registry import PrunableModel
+from src.pruning.registry import (
+    PruneContext, PruneDecision, PruningMethod, register_pruning_method)
+
+_SQRT2PI = np.sqrt(2.0 * np.pi)
+_EPS_C = 1e-9        # |corr| beyond 1 - _EPS_C uses the degenerate branches
+_NUDGE = 1e-12
+TINY = 1e-12
+ZERO_NORM = 1e-10
+
+SCORES = ("cylinder", "delta_f", "exact_damage")
+DICTIONARIES = ("merge", "medoid")
+REPAIRS = ("sum", "projection", "kernel", "empirical")
+
+
+# ── rectified-Gaussian moments ───────────────────────────────────────────────
+
+def _phi(x: np.ndarray) -> np.ndarray:
+    return np.exp(-0.5 * np.square(x)) / _SQRT2PI
+
+
+def _phibar(x: np.ndarray) -> np.ndarray:
+    return ndtr(-x)
+
+
+def _bvn_sf(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> np.ndarray:
+    """P(X > a, Y > b) for a standard bivariate normal with correlation c,
+    via Owen's T (Owen 1956). Vectorized; no quadrature."""
+    a, b, c = np.broadcast_arrays(
+        *(np.asarray(v, dtype=np.float64) for v in (a, b, c)))
+    h, k = -a, -b
+    cc = np.clip(c, -1.0 + _EPS_C, 1.0 - _EPS_C)
+    s = np.sqrt(1.0 - cc * cc)
+    hh = np.where(np.abs(h) < _NUDGE, _NUDGE, h)
+    kk = np.where(np.abs(k) < _NUDGE, _NUDGE, k)
+    beta = np.where(hh * kk < 0.0, 0.5, 0.0)
+    general = (0.5 * (ndtr(hh) + ndtr(kk))
+               - owens_t(hh, (kk - cc * hh) / (hh * s))
+               - owens_t(kk, (hh - cc * kk) / (kk * s)) - beta)
+    pos = ndtr(np.minimum(h, k))                            # c -> +1
+    neg = np.clip(ndtr(h) + ndtr(k) - 1.0, 0.0, None)       # c -> -1
+    out = np.where(c >= 1.0 - _EPS_C, pos,
+                   np.where(c <= -1.0 + _EPS_C, neg, general))
+    return np.clip(out, 0.0, 1.0)
+
+
+def relu_self(a: np.ndarray) -> np.ndarray:
+    """A(a) = E[(t - a)_+^2] for t ~ N(0, 1)."""
+    a = np.asarray(a, dtype=np.float64)
+    return (1.0 + a * a) * _phibar(a) - a * _phi(a)
+
+
+def relu_cross(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> np.ndarray:
+    """G(a, b, c) = E[(x - a)_+ (y - b)_+] for a standard bivariate normal
+    with correlation c. G(0, 0, cos t) is the order-one arc-cosine kernel
+    (sin t + (pi - t) cos t) / (2 pi)."""
+    a, b, c = np.broadcast_arrays(
+        *(np.asarray(v, dtype=np.float64) for v in (a, b, c)))
+    cc = np.clip(c, -1.0 + _EPS_C, 1.0 - _EPS_C)
+    s = np.sqrt(1.0 - cc * cc)
+    general = ((cc + a * b) * _bvn_sf(a, b, cc)
+               - b * _phi(a) * _phibar((b - cc * a) / s)
+               - a * _phi(b) * _phibar((a - cc * b) / s)
+               + s * _phi(b) * _phi((a - cc * b) / s))
+
+    m = np.maximum(a, b)                                    # c -> +1
+    pos = _phibar(m) * (1.0 + a * b) + _phi(m) * (m - a - b)
+
+    lo, hi = a, -b                                          # c -> -1
+    empty = lo >= hi
+    lo_s, hi_s = np.where(empty, 0.0, lo), np.where(empty, 0.0, hi)
+    I0 = ndtr(hi_s) - ndtr(lo_s)
+    I1 = _phi(lo_s) - _phi(hi_s)
+    I2 = I0 - (hi_s * _phi(hi_s) - lo_s * _phi(lo_s))
+    neg = np.where(empty, 0.0, -I2 + (a - b) * I1 + a * b * I0)
+
+    out = np.where(c >= 1.0 - _EPS_C, pos,
+                   np.where(c <= -1.0 + _EPS_C, neg, general))
+    return np.clip(out, 0.0, None)
+
+
+def _relu_moments(m: np.ndarray, s: np.ndarray) -> np.ndarray:
+    """E[sigma(t)] for t ~ N(m, s^2)."""
+    s = np.maximum(s, 1e-300)
+    z = -m / s
+    return s * (_phi(z) - z * _phibar(z))
+
+
+def gram(mA, sA, mB, sB, corr) -> np.ndarray:
+    """E[sigma(tA) sigma(tB)] on broadcast grids of Gaussian units."""
+    sA = np.maximum(sA, 1e-300)
+    sB = np.maximum(sB, 1e-300)
+    return sA * sB * relu_cross(-mA / sA, -mB / sB, np.clip(corr, -1.0, 1.0))
+
+
+class UnitMoments:
+    """Pre-activation statistics of affine units under z ~ N(mu, Sigma)."""
+
+    def __init__(self, U: np.ndarray, rho: np.ndarray, mu: np.ndarray,
+                 Sigma: np.ndarray):
+        self.U = U
+        self.m = U @ mu - rho
+        self._SU = U @ Sigma
+        self.s = np.sqrt(np.clip(np.einsum("ij,ij->i", self._SU, U), 0.0, None))
+
+    def corr_with(self, other: "UnitMoments") -> np.ndarray:
+        cov = self._SU @ other.U.T
+        return cov / np.maximum(np.outer(self.s, other.s), 1e-300)
+
+    def gram_with(self, other: "UnitMoments") -> np.ndarray:
+        return gram(self.m[:, None], self.s[:, None], other.m[None, :],
+                    other.s[None, :], self.corr_with(other))
+
+
+# ── units ────────────────────────────────────────────────────────────────────
+
+@dataclass
+class Units:
+    """Canonical form of one prunable layer's units. BatchNorm, if paired with
+    the layer, is already folded into (u, rho, alpha)."""
+
+    u: np.ndarray        # [H, d] orientations
+    rho: np.ndarray      # [H] signed offsets
+    alpha: np.ndarray    # [H] gains
+    C: np.ndarray        # [H, m] outgoing columns
+
+    @property
+    def mass(self) -> np.ndarray:
+        """a_i = alpha_i ||c_i|| = ||v_i||, gauge-invariant."""
+        return self.alpha * np.linalg.norm(self.C, axis=1)
+
+    @property
+    def V(self) -> np.ndarray:
+        """Effective outgoing weights v_i = alpha_i c_i."""
+        return self.alpha[:, None] * self.C
+
+    def subset(self, idx: np.ndarray) -> "Units":
+        return Units(self.u[idx], self.rho[idx], self.alpha[idx], self.C[idx])
+
+
+def extract_units(model: PrunableModel, layer_idx: int) -> tuple[Units, np.ndarray]:
+    """(units, ok). `ok` marks rows with ||w|| > 0: a zero-norm unit has no
+    hyperplane (sigma(b) is constant), so it is frozen out of merging and
+    carried through untouched."""
+    layer = model.prunable_layer(layer_idx)
+    W = layer.weight.data.double().reshape(layer.weight.shape[0], -1).cpu().numpy()
+    b = (layer.bias.data.double().cpu().numpy() if layer.bias is not None
+         else np.zeros(W.shape[0]))
+
+    bn = model.prunable_bn(layer_idx)
+    if bn is not None:                       # fold exactly, eval-mode BN
+        std = np.sqrt(bn.running_var.detach().double().cpu().numpy() + bn.eps)
+        scale = bn.weight.detach().double().cpu().numpy() / std
+        b = (bn.bias.detach().double().cpu().numpy()
+             - scale * bn.running_mean.detach().double().cpu().numpy()
+             + scale * b)
+        W = scale[:, None] * W
+
+    C = model.outgoing_weights(layer_idx).double().cpu().numpy()
+    if C.shape[0] != W.shape[0]:             # patch-major conv consumer
+        C = C.reshape(W.shape[0], -1)
+
+    alpha = np.linalg.norm(W, axis=1)
+    ok = alpha > ZERO_NORM
+    safe = np.where(ok, alpha, 1.0)
+    return Units(W / safe[:, None], -b / safe, alpha, C), ok
+
+
+# ── the greedy engine ────────────────────────────────────────────────────────
+
+class MashEngine:
+    """Greedy mass-weighted Ward agglomeration over one layer's units.
+
+    State is the additive quadruple (g, r, A, w) per cluster, so every merge is
+    associative and the trajectory is order-free. One pass produces the whole
+    dendrogram; a cut at any width is then free, which is what makes a single
+    pass serve every target width.
+    """
+
+    def __init__(self, units: Units, score: str = "delta_f",
+                 x0: np.ndarray | None = None, radius: float | None = None,
+                 mu: np.ndarray | None = None, Sigma: np.ndarray | None = None,
+                 gauge_correct: bool = True):
+        if score not in SCORES:
+            raise ValueError(f"score must be one of {SCORES}, got {score!r}")
+        if score == "cylinder" and (x0 is None or radius is None):
+            raise ValueError("score='cylinder' needs the input box (x0, radius)")
+        if score != "cylinder" and (mu is None or Sigma is None):
+            raise ValueError(f"score={score!r} needs calibration moments (mu, Sigma)")
+
+        self.orig = units
+        self.score = score
+        self.gauge_correct = gauge_correct
+        a = units.mass
+        H = len(a)
+        self.n_orig = H
+        self.members: list[list[int]] = [[i] for i in range(H)]
+        self.A = a.copy()                              # cluster mass
+        self.g = a[:, None] * units.u                  # [H, d]
+        self.r = a * units.rho                         # [H]
+        self.w = units.V.copy()                        # [H, m]
+        self.active = np.ones(H, dtype=bool)
+        self.cum_cost = 0.0
+
+        # certificate state (always maintained; cheap and needed by both tiers)
+        self.x0 = np.zeros(units.u.shape[1]) if x0 is None else np.asarray(x0, float)
+        self.R = 0.0 if radius is None else float(radius)
+        self.cert_terms = np.zeros(H)
+
+        if score == "cylinder":
+            self._radius = float(radius)
+        else:
+            self.mu = np.asarray(mu, dtype=np.float64)
+            Sig = np.asarray(Sigma, dtype=np.float64)
+            self.Sigma = np.diag(Sig) if Sig.ndim == 1 else Sig
+            D = self.g @ self.Sigma @ self.g.T
+            self._D = 0.5 * (D + D.T)                  # additive
+            self._dotmu = self.g @ self.mu             # additive
+            if score == "exact_damage":
+                self._W = self.w @ self.w.T            # additive
+        self._cost = self._all_costs()
+
+    # -- codes -------------------------------------------------------------
+
+    @property
+    def n_active(self) -> int:
+        return int(self.active.sum())
+
+    def _norms(self, idx: np.ndarray) -> np.ndarray:
+        return np.linalg.norm(self.g[idx], axis=1)
+
+    def _code(self, idx: np.ndarray, kind: str) -> tuple[np.ndarray, np.ndarray]:
+        """(direction, offset-vs-x0) of clusters `idx`.
+
+        kind='realized'  g/||g||       -- the unit-norm hyperplane emitted
+        kind='centroid'  g/A           -- the mass-weighted mean covector; this
+                                          is eta_C times the realized one, and
+                                          it is the coefficient vector of the
+                                          mean pre-activation, hence what the
+                                          Ward identity and the gauge-corrected
+                                          emission both refer to.
+        """
+        den = self._norms(idx) if kind == "realized" else self.A[idx]
+        safe = np.where(den > TINY, den, 1.0)
+        u = np.where((den > TINY)[:, None], self.g[idx] / safe[:, None], 0.0)
+        off = np.where(den > TINY, (self.g[idx] @ self.x0 - self.r[idx]) / safe, 0.0)
+        return u, off
+
+    def emitted_code(self, idx: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """The code of the affine function each cluster actually realizes."""
+        return self._code(idx, "centroid" if self.gauge_correct else "realized")
+
+    # -- scores ------------------------------------------------------------
+
+    def _ward_weight(self, k: int, idx: np.ndarray) -> np.ndarray:
+        den = self.A[idx] + self.A[k]
+        return np.where(den > TINY, self.A[idx] * self.A[k] / np.maximum(den, TINY), 0.0)
+
+    def _pair_costs(self, k: int, idx: np.ndarray) -> np.ndarray:
+        if len(idx) == 0:
+            return np.zeros(0)
+        if self.score == "cylinder":
+            u, off = self._code(np.concatenate([[k], idx]), "centroid")
+            qt = np.concatenate([self._radius * u, off[:, None]], axis=1)
+            d2 = ((qt[1:] - qt[0]) ** 2).sum(axis=1)
+            return self._ward_weight(k, idx) * d2
+
+        nk = float(np.linalg.norm(self.g[k]))
+        nl = self._norms(idx)
+        Dkk = max(float(self._D[k, k]), 0.0)
+        Dll = np.clip(self._D[idx, idx], 0.0, None)
+        Dkl = self._D[k, idx]
+        SDk, SDl = np.sqrt(Dkk), np.sqrt(Dll)
+        # unit-gain response of a cluster: t = (g^T x - r) / ||g||
+        zk = (self.r[k] - self._dotmu[k]) / max(SDk, 1e-300)
+        zl = (self.r[idx] - self._dotmu[idx]) / np.maximum(SDl, 1e-300)
+        sk = SDk / max(nk, TINY)
+        sl = SDl / np.where(nl > TINY, nl, TINY)
+        ckl = np.clip(Dkl / np.maximum(SDk * SDl, 1e-300), -1.0, 1.0)
+
+        Kkk = sk * sk * relu_self(zk)
+        Kll = sl * sl * relu_self(zl)
+        Kkl = sk * sl * relu_cross(np.full_like(zl, zk), zl, ckl)
+
+        if self.score == "delta_f":
+            d2 = np.clip(Kkk + Kll - 2.0 * Kkl, 0.0, None)
+            return self._ward_weight(k, idx) * d2
+
+        # exact_damage: bring in the candidate merged unit and the fan-out Gram
+        Dcc = np.clip(Dkk + 2.0 * Dkl + Dll, 0.0, None)
+        SDc = np.sqrt(Dcc)
+        gc = self.g[k] + self.g[idx]
+        nc = np.linalg.norm(gc, axis=1)
+        zc = (self.r[k] + self.r[idx] - self._dotmu[k] - self._dotmu[idx]) \
+            / np.maximum(SDc, 1e-300)
+        sc = SDc / np.where(nc > TINY, nc, TINY)
+        ckc = np.clip((Dkk + Dkl) / np.maximum(SDk * SDc, 1e-300), -1.0, 1.0)
+        clc = np.clip((Dkl + Dll) / np.maximum(SDl * SDc, 1e-300), -1.0, 1.0)
+        Kcc = sc * sc * relu_self(zc)
+        Kkc = sk * sc * relu_cross(np.full_like(zc, zk), zc, ckc)
+        Klc = sl * sc * relu_cross(zl, zc, clc)
+        cost = (self._W[k, k] * np.clip(Kkk + Kcc - 2.0 * Kkc, 0.0, None)
+                + self._W[idx, idx] * np.clip(Kll + Kcc - 2.0 * Klc, 0.0, None)
+                + 2.0 * self._W[k, idx] * (Kkl + Kcc - Kkc - Klc))
+        return np.where(nc > TINY, np.clip(cost, 0.0, None), 0.0)
+
+    def _all_costs(self) -> np.ndarray:
+        H = self.n_orig
+        cost = np.full((H, H), np.inf)
+        allidx = np.arange(H)
+        for k in range(H):
+            cost[k, allidx] = self._pair_costs(k, allidx)
+        cost[allidx, allidx] = np.inf
+        return cost
+
+    # -- certificate -------------------------------------------------------
+
+    def _cert_term(self, k: int) -> float:
+        """sum_i a_i (R ||u_i - uhat|| + |gamma_i - gammahat|) over the members
+        of cluster k, against the code it actually emits. Summing this over the
+        active clusters bounds sup_x ||F_T(x) - F_0(x)|| on the box."""
+        mem = np.array(self.members[k])
+        uh, oh = self.emitted_code(np.array([k]))
+        du = self.orig.u[mem] - uh[0]
+        gam = self.orig.u[mem] @ self.x0 - self.orig.rho[mem]
+        return float((self.orig.mass[mem]
+                      * (self.R * np.linalg.norm(du, axis=1)
+                         + np.abs(gam - oh[0]))).sum())
+
+    def certificate(self) -> float:
+        return float(self.cert_terms[self.active].sum())
+
+    # -- one merge ---------------------------------------------------------
+
+    def step(self) -> dict:
+        k, l = np.unravel_index(np.argmin(self._cost), self._cost.shape)
+        k, l = int(min(k, l)), int(max(k, l))
+        cost = float(self._cost[k, l])
+        self.cum_cost += cost
+
+        self.members[k].extend(self.members[l])
+        self.A[k] += self.A[l]
+        self.g[k] += self.g[l]
+        self.r[k] += self.r[l]
+        self.w[k] += self.w[l]
+        self.active[l] = False
+        self._cost[l, :] = np.inf
+        self._cost[:, l] = np.inf
+
+        if self.score != "cylinder":
+            row = self._D[k, :] + self._D[l, :]
+            row[k] = self._D[k, k] + 2.0 * self._D[k, l] + self._D[l, l]
+            self._D[k, :] = row
+            self._D[:, k] = row
+            self._dotmu[k] += self._dotmu[l]
+            if self.score == "exact_damage":
+                rw = self._W[k, :] + self._W[l, :]
+                rw[k] = self._W[k, k] + 2.0 * self._W[k, l] + self._W[l, l]
+                self._W[k, :] = rw
+                self._W[:, k] = rw
+
+        others = np.flatnonzero(self.active)
+        others = others[others != k]
+        new = self._pair_costs(k, others)
+        self._cost[k, :] = np.inf
+        self._cost[:, k] = np.inf
+        self._cost[k, others] = new
+        self._cost[others, k] = new
+
+        self.cert_terms[k] = self._cert_term(k)
+        nrm = float(np.linalg.norm(self.g[k]))
+        return {"survivor": k, "removed": l, "cost": cost,
+                "cum_cost": self.cum_cost, "certificate": self.certificate(),
+                "cluster_size": len(self.members[k]),
+                "eta": nrm / self.A[k] if self.A[k] > TINY else np.nan}
+
+    def dendrogram(self, max_steps: int | None = None) -> list[dict]:
+        """Run the full greedy pass (or `max_steps` of it) and return the
+        per-step records. Cutting at step T is then a free lookup."""
+        recs = []
+        budget = self.n_orig - 1 if max_steps is None else max_steps
+        while self.n_active > 1 and len(recs) < budget:
+            recs.append(self.step())
+        return recs
+
+    def mass_total(self) -> float:
+        return float(self.A[self.active].sum())
+
+
+def partition_at(H: int, pairs: list[tuple[int, int]], k: int) -> list[list[int]]:
+    """Union-find cut of a merge sequence after `k` merges."""
+    parent = list(range(H))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i, j in pairs[:k]:
+        parent[find(j)] = find(i)
+    clusters: dict[int, list[int]] = {}
+    for x in range(H):
+        clusters.setdefault(find(x), []).append(x)
+    return list(clusters.values())
+
+
+# ── realization and repair ───────────────────────────────────────────────────
+
+def realize(units: Units, ok: np.ndarray, clusters: list[list[int]],
+            dictionary: str = "merge", repair: str = "sum",
+            gauge_correct: bool = True, mu: np.ndarray | None = None,
+            Sigma: np.ndarray | None = None, Z: np.ndarray | None = None,
+            bias_fix: bool = False, ridge: float = 1e-8):
+    """(rows, biases, columns, keep_slots, bias_delta) for one layer.
+
+    `rows`/`biases` are the surviving units' own parameters, `columns` their
+    consumer columns, `keep_slots` the original index kept for each cluster.
+    `Z` (calibration inputs OF THIS LAYER, [N, d]) is required by
+    repair='empirical'; (mu, Sigma) by 'projection'/'kernel' and by bias_fix.
+    """
+    if dictionary not in DICTIONARIES:
+        raise ValueError(f"dictionary must be one of {DICTIONARIES}")
+    if repair not in REPAIRS:
+        raise ValueError(f"repair must be one of {REPAIRS}")
+    a, V = units.mass, units.V
+    rows, biases, cols, keep = [], [], [], []
+
+    for mem in clusters:
+        m = np.array(mem)
+        if len(m) == 1 and not ok[m[0]]:          # constant unit: carry as-is
+            i = int(m[0])
+            rows.append(units.u[i]); biases.append(-units.rho[i])
+            cols.append(units.C[i]); keep.append(i)
+            continue
+        w_sum = V[m].sum(axis=0)
+        if dictionary == "medoid":
+            rep = int(m[np.argmax(a[m])])
+            u_new, rho_new, col = units.u[rep], units.rho[rep], w_sum
+            keep.append(rep)
+        else:
+            g = (a[m, None] * units.u[m]).sum(axis=0)
+            n = float(np.linalg.norm(g))
+            A = float(a[m].sum())
+            if n < TINY:                          # total cancellation: delete
+                rows.append(np.zeros(units.u.shape[1])); biases.append(0.0)
+                cols.append(w_sum); keep.append(int(m[0]))
+                continue
+            eta = n / A if A > TINY else 1.0
+            u_new = g / n
+            rho_new = float((a[m] * units.rho[m]).sum()) / n
+            col = eta * w_sum if gauge_correct else w_sum
+            keep.append(int(m[np.argmax(a[m])]))
+        rows.append(u_new); biases.append(-rho_new); cols.append(col)
+
+    rows = np.array(rows); biases = np.array(biases); cols = np.array(cols)
+    if repair == "sum" and not bias_fix:
+        return rows, biases, cols, keep, None
+
+    # Grams: sample averages over the calibration inputs, or analytic under
+    # N(mu, Sigma). Both estimate the same G, B of the normal equations.
+    if repair == "empirical":
+        if Z is None:
+            raise ValueError("repair='empirical' needs the layer inputs Z")
+        Phi_orig = np.maximum(Z @ units.u.T - units.rho[None, :], 0.0)
+        Phi_keep = np.maximum(Z @ rows.T + biases[None, :], 0.0)
+        N = len(Z)
+        G = Phi_keep.T @ Phi_keep / N
+        B = Phi_keep.T @ (Phi_orig * units.alpha[None, :]) / N
+        Eh = (Phi_orig * units.alpha[None, :]).mean(axis=0)
+        Ehat = Phi_keep.mean(axis=0)
+    else:
+        if mu is None or Sigma is None:
+            raise ValueError(f"repair={repair!r} needs calibration moments")
+        S = np.diag(Sigma) if np.ndim(Sigma) == 1 else Sigma
+        orig = UnitMoments(units.u, units.rho, mu, S)
+        kept = UnitMoments(rows, -biases, mu, S)
+        G = kept.gram_with(kept)
+        B = kept.gram_with(orig) * units.alpha[None, :]
+        Eh = units.alpha * _relu_moments(orig.m, orig.s)
+        Ehat = _relu_moments(kept.m, kept.s)
+
+    if repair == "projection":
+        for k, mem in enumerate(clusters):
+            m = np.array(mem)
+            if len(m) == 1 and not ok[m[0]]:
+                continue
+            if G[k, k] > 1e-30:
+                cols[k] = (B[k, m] / G[k, k])[:, None].T @ units.C[m]
+    elif repair in ("kernel", "empirical"):
+        lam = ridge * max(np.trace(G) / max(len(G), 1), 1e-30)
+        cols = np.linalg.solve(G + lam * np.eye(len(G)), B @ units.C)
+
+    delta = (Eh @ units.C - Ehat @ cols) if bias_fix else None
+    return rows, biases, cols, keep, delta
+
+
+# ── the pruning methods ──────────────────────────────────────────────────────
+
+def _layer_inputs(model: PrunableModel, layer_idx: int,
+                  x: torch.Tensor) -> np.ndarray:
+    """Calibration inputs of the prunable layer, [N, d]."""
+    layer = model.prunable_layer(layer_idx)
+    grabbed: list[torch.Tensor] = []
+    h = layer.register_forward_hook(lambda m, inp, out: grabbed.append(inp[0].detach()))
+    try:
+        with torch.no_grad():
+            model(x)
+    finally:
+        h.remove()
+    z = grabbed[0]
+    return z.reshape(-1, z.shape[-1]).double().cpu().numpy()
+
+
+class _MashBase(PruningMethod):
+    """Shared plumbing: build the engine, cut it, realize, emit a decision."""
+
+    score = "delta_f"
+    dictionary = "merge"
+    repair = "kernel"
+
+    def __init__(self, score: str | None = None, dictionary: str | None = None,
+                 repair: str | None = None, n_calib: int = 128,
+                 gauge_correct: bool = True, bias_fix: bool = False,
+                 radius: str = "sup"):
+        if score is not None:
+            self.score = score
+        if dictionary is not None:
+            self.dictionary = dictionary
+        if repair is not None:
+            self.repair = repair
+        for name, val, allowed in (("score", self.score, SCORES),
+                                   ("dictionary", self.dictionary, DICTIONARIES),
+                                   ("repair", self.repair, REPAIRS)):
+            if val not in allowed:
+                raise ValueError(f"{name} must be one of {allowed}, got {val!r}")
+        if radius not in ("sup", "l2"):
+            raise ValueError("radius must be 'sup' or 'l2'")
+        self.n_calib = int(n_calib)
+        self.gauge_correct = bool(gauge_correct)
+        self.bias_fix = bool(bias_fix)
+        self.radius = radius
+
+    # -- setup ------------------------------------------------------------
+
+    def _prepare(self, model: PrunableModel, layer_idx: int, ctx: PruneContext):
+        layer = model.prunable_layer(layer_idx)
+        if not isinstance(layer, nn.Linear):
+            raise NotImplementedError(
+                "mash currently supports nn.Linear prunable layers; conv units "
+                "live on im2col patches and need patch-space moments (see "
+                "studies/gram_stability/resnet_phase_a.py)")
+        if self.dictionary == "merge" and model.prunable_bn(layer_idx) is not None:
+            raise NotImplementedError(
+                "dictionary='merge' synthesizes a hyperplane no original unit "
+                "realizes, so the paired BatchNorm's per-channel affine would "
+                "have to be rewritten too, which PrunableModel does not expose. "
+                "Use dictionary='medoid' on BatchNorm layers -- survivors keep "
+                "their original filters and BN slots.")
+
+        units, ok = extract_units(model, layer_idx)
+        idx_map = np.flatnonzero(ok)
+        frozen = np.flatnonzero(~ok)
+        sub = units.subset(idx_map)
+
+        needs_data = (self.score != "cylinder"
+                      or self.repair in ("projection", "kernel", "empirical")
+                      or self.bias_fix)
+        Z = mu = Sigma = None
+        if needs_data or True:                    # the box is cheap; always get Z
+            Z = _layer_inputs(model, layer_idx, ctx.train_inputs[: self.n_calib])
+            mu, Sigma = Z.mean(axis=0), np.atleast_2d(np.cov(Z.T))
+        x0 = (Z.min(axis=0) + Z.max(axis=0)) / 2.0
+        half = (Z.max(axis=0) - Z.min(axis=0)) / 2.0
+        R = float(np.linalg.norm(half))
+        rad = R if self.radius == "sup" else R / np.sqrt(Z.shape[1] + 2.0)
+        return units, ok, idx_map, frozen, sub, Z, mu, Sigma, x0, R, rad
+
+    def _emit(self, model, layer_idx, units, ok, idx_map, frozen, clusters_sub,
+              Z, mu, Sigma) -> PruneDecision:
+        clusters = [[int(idx_map[i]) for i in cl] for cl in clusters_sub] \
+            + [[int(f)] for f in frozen]
+        rows, biases, cols, keep, delta = realize(
+            units, ok, clusters, dictionary=self.dictionary, repair=self.repair,
+            gauge_correct=self.gauge_correct, mu=mu, Sigma=Sigma, Z=Z,
+            bias_fix=self.bias_fix)
+
+        H, d = units.u.shape
+        W_new = units.u.copy()
+        b_new = -units.rho.copy()
+        C_new = units.C.copy()
+        remove: list[int] = []
+        for cl, slot, row, bias, col in zip(clusters, keep, rows, biases, cols):
+            W_new[slot] = row
+            b_new[slot] = bias
+            C_new[slot] = col
+            remove.extend(int(i) for i in cl if int(i) != slot)
+
+        # undo the unit-gain gauge: the layer's rows carry alpha = 1 now, so the
+        # emitted column IS the effective outgoing weight.
+        dec = PruneDecision(
+            remove=sorted(remove),
+            new_incoming=(torch.from_numpy(W_new), torch.from_numpy(b_new)),
+            new_outgoing=torch.from_numpy(C_new))
+        if delta is not None:
+            dec.bias_delta = torch.from_numpy(delta)
+        return dec
+
+
+@register_pruning_method("mash")
+class MASH(_MashBase):
+    """Width-driven MASH: merge until `n_remove` units are gone.
+
+    Width is given either absolutely (`n_remove`) or as a fraction of the
+    layer (`fraction`), which is what joint equal-fraction pruning of every
+    layer needs -- one absolute count cannot express it, since the layers have
+    different widths and the count would clamp the narrow ones.
+
+    params: n_remove OR fraction, score, dictionary, repair, n_calib,
+            gauge_correct, bias_fix, radius. Defaults are the configuration
+            that performs best on fully connected layers: delta_f selection,
+            merged dictionary, global kernel repair.
+    """
+
+    def __init__(self, n_remove: int = 1, fraction: float | None = None, **kw):
+        super().__init__(**kw)
+        if fraction is not None and not 0.0 <= fraction <= 1.0:
+            raise ValueError(f"fraction must be in [0, 1], got {fraction}")
+        self.n_remove = int(n_remove)
+        self.fraction = None if fraction is None else float(fraction)
+
+    def select(self, model: PrunableModel, layer_idx: int,
+               ctx: PruneContext) -> PruneDecision:
+        (units, ok, idx_map, frozen, sub, Z, mu, Sigma,
+         x0, R, rad) = self._prepare(model, layer_idx, ctx)
+        H = len(idx_map)
+        want = (self.n_remove if self.fraction is None
+                else int(round(self.fraction * (H - 1))))
+        budget = min(want, max(H - 1, 0))
+        if budget <= 0:
+            return PruneDecision(remove=[])
+        eng = MashEngine(sub, score=self.score, x0=x0, radius=rad, mu=mu,
+                         Sigma=Sigma, gauge_correct=self.gauge_correct)
+        recs = eng.dendrogram(max_steps=budget)
+        pairs = [(r["survivor"], r["removed"]) for r in recs]
+        clusters = partition_at(H, pairs, len(pairs))
+        return self._emit(model, layer_idx, units, ok, idx_map, frozen,
+                          clusters, Z, mu, Sigma)
+
+
+@register_pruning_method("mash_certified")
+class MASHCertified(_MashBase):
+    """Tolerance-driven MASH: the domain-only tier.
+
+    Merges while the certificate stays inside `tol` times the layer's scale,
+    so the retained width is chosen by the guarantee rather than set in
+    advance. The bound is
+        sum_C sum_{i in C} a_i (R ||u_i - uhat_C|| + |gamma_i - gammahat_C|)
+    which upper-bounds sup_x ||F_T(x) - F_0(x)|| over the calibration box.
+
+    `scale='mass'` normalizes by the layer's total mass sum_i a_i (no
+    activations needed, so the whole rule stays domain-only); `scale='output'`
+    normalizes by the mean response norm on the calibration inputs, which is
+    tighter but reads activations. NOTE that a tolerance is NOT portable across
+    datasets -- the certificate's looseness factor is itself data-dependent, so
+    calibrate `tol` once per (architecture, dataset).
+
+    params: tol, scale, plus the shared ones. Selection and repair default to
+    the certified configuration (cylinder score, sum rule).
+    """
+
+    score = "cylinder"
+    dictionary = "merge"
+    repair = "sum"
+
+    def __init__(self, tol: float = 0.05, scale: str = "mass",
+                 max_fraction: float = 1.0, **kw):
+        super().__init__(**kw)
+        if scale not in ("mass", "output"):
+            raise ValueError("scale must be 'mass' or 'output'")
+        self.tol = float(tol)
+        self.scale = scale
+        self.max_fraction = float(max_fraction)
+
+    def select(self, model: PrunableModel, layer_idx: int,
+               ctx: PruneContext) -> PruneDecision:
+        (units, ok, idx_map, frozen, sub, Z, mu, Sigma,
+         x0, R, rad) = self._prepare(model, layer_idx, ctx)
+        H = len(idx_map)
+        if H <= 1:
+            return PruneDecision(remove=[])
+        eng = MashEngine(sub, score=self.score, x0=x0, radius=rad, mu=mu,
+                         Sigma=Sigma, gauge_correct=self.gauge_correct)
+        if self.scale == "mass":
+            denom = eng.mass_total()
+        else:
+            Phi0 = np.maximum(Z @ sub.u.T - sub.rho[None, :], 0.0)
+            denom = float(np.linalg.norm(Phi0 @ sub.V, axis=1).mean())
+        budget = self.tol * max(denom, 1e-30)
+
+        cap = int(self.max_fraction * (H - 1))
+        recs = eng.dendrogram(max_steps=max(cap, 0))
+        # last cut whose certificate is still inside the budget (first crossing)
+        T = 0
+        for t, rec in enumerate(recs, start=1):
+            if rec["certificate"] > budget:
+                break
+            T = t
+        pairs = [(r["survivor"], r["removed"]) for r in recs[:T]]
+        clusters = partition_at(H, pairs, len(pairs))
+        return self._emit(model, layer_idx, units, ok, idx_map, frozen,
+                          clusters, Z, mu, Sigma)
+
+
+# ── self-tests ───────────────────────────────────────────────────────────────
+
+def _selftest() -> None:  # pragma: no cover
+    rng = np.random.default_rng(0)
+
+    # 1. arc-cosine identity and the c = +-1 branches
+    for th in [0.0, 0.3, 1.0, np.pi / 2, 2.5, np.pi]:
+        want = (np.sin(th) + (np.pi - th) * np.cos(th)) / (2 * np.pi)
+        assert abs(float(relu_cross(0.0, 0.0, np.cos(th))) - want) < 1e-12, th
+    for a in [-2.0, -0.3, 0.0, 0.7, 3.0]:
+        assert abs(float(relu_cross(a, a, 1.0)) - float(relu_self(a))) < 1e-12
+
+    # 2. cross kernel vs Monte Carlo
+    n = 1_000_000
+    x, e = rng.standard_normal(n), rng.standard_normal(n)
+    for a, b, c in [(-0.5, 0.3, 0.6), (1.2, -0.8, -0.4), (2.5, 2.0, 0.3)]:
+        y = c * x + np.sqrt(1 - c * c) * e
+        prod = np.clip(x - a, 0, None) * np.clip(y - b, 0, None)
+        mc, cf = float(prod.mean()), float(relu_cross(a, b, c))
+        assert abs(cf - mc) < 5e-3 * max(mc, 1e-3) + 4.0 * np.sqrt(prod.var() / n), \
+            (a, b, c, cf, mc)
+
+    d, H, m = 10, 12, 4
+    W = rng.normal(size=(H, d)); b = rng.normal(size=H); C = rng.normal(size=(H, m))
+    for j, s in [(4, 2.5), (5, 0.7)]:               # 3,4,5 share a hyperplane
+        W[j] = s * W[3]; b[j] = s * b[3]
+    alpha = np.linalg.norm(W, axis=1)
+    units = Units(W / alpha[:, None], -b / alpha, alpha, C)
+    ok = np.ones(H, dtype=bool)
+    X = rng.normal(size=(512, d))
+    mu, Sigma = X.mean(axis=0), np.cov(X.T)
+    x0, R = np.zeros(d), float(np.sqrt(d))
+
+    def layer_out(rows, biases, cols, Z):
+        return np.maximum(Z @ rows.T + biases, 0.0) @ cols
+
+    ref = layer_out(units.u, -units.rho, units.V, X)
+
+    # 3. mass is gauge invariant
+    t = 3.7
+    scaled = Units(units.u, units.rho, units.alpha * t, units.C / t)
+    assert np.allclose(units.mass, scaled.mass), "mass must be gauge invariant"
+
+    for score in SCORES:
+        eng = MashEngine(units, score=score, x0=x0, radius=R, mu=mu, Sigma=Sigma)
+        # scores carry different units (exact_damage is a squared output
+        # energy), so "free" is judged relative to a typical pair cost
+        finite = eng._cost[np.isfinite(eng._cost)]
+        scale = float(np.median(finite)) if len(finite) else 1.0
+        r1, r2 = eng.step(), eng.step()
+        assert max(r1["cost"], r2["cost"]) < 1e-9 * scale, \
+            (f"{score}: duplicate hyperplanes must be free, got "
+             f"{r1['cost']:.2e}/{r2['cost']:.2e} vs scale {scale:.2e}")
+        merged = set(eng.members[r2["survivor"]])
+        assert merged == {3, 4, 5}, f"{score}: expected 3,4,5 merged, got {merged}"
+
+        # 4. exactness: merging identical hyperplanes preserves the function
+        clusters = [c for c in partition_at(H, [(r["survivor"], r["removed"])
+                                                for r in (r1, r2)], 2)]
+        rows, biases, cols, keep, _ = realize(units, ok, clusters, repair="sum")
+        err = np.abs(layer_out(rows, biases, cols, X) - ref).max()
+        assert err < 1e-9, f"{score}: duplicate merge must be exact, got {err:.2e}"
+        assert len(rows) == H - 2
+
+        # 5. the additive triple is order-free
+        g_direct = (units.mass[[3, 4, 5], None] * units.u[[3, 4, 5]]).sum(axis=0)
+        k = r2["survivor"]
+        assert np.allclose(eng.g[k], g_direct, atol=1e-12), f"{score}: not associative"
+
+    # 6. mass and the raw covector sum are conserved over a full sweep
+    eng = MashEngine(units, score="delta_f", x0=x0, radius=R, mu=mu, Sigma=Sigma)
+    m0 = (eng.g[eng.active].sum(axis=0).copy(), eng.mass_total())
+    eng.dendrogram()
+    assert abs(eng.mass_total() - m0[1]) < 1e-10 * m0[1], "mass must be conserved"
+    drift = np.abs(eng.g[eng.active].sum(axis=0) - m0[0]).max() / np.abs(m0[0]).max()
+    assert drift < 1e-12, f"covector sum must be conserved, drift {drift:.2e}"
+
+    # 7. the certificate really bounds the realized sup error on the box
+    box = x0 + R / np.sqrt(d) * rng.uniform(-1, 1, size=(4000, d))
+    ref_box = layer_out(units.u, -units.rho, units.V, box)
+    eng = MashEngine(units, score="cylinder", x0=x0, radius=R)
+    for _ in range(6):
+        eng.step()
+    pairs = [(i, j) for i, j in zip(*[[], []])]  # rebuilt below
+    eng2 = MashEngine(units, score="cylinder", x0=x0, radius=R)
+    recs = eng2.dendrogram(max_steps=6)
+    cl = partition_at(H, [(r["survivor"], r["removed"]) for r in recs], 6)
+    rows, biases, cols, keep, _ = realize(units, ok, cl, repair="sum")
+    realized = np.abs(layer_out(rows, biases, cols, box) - ref_box).sum(axis=1).max()
+    cert = recs[-1]["certificate"]
+    assert cert >= realized - 1e-9, \
+        f"certificate {cert:.4e} must bound realized {realized:.4e}"
+
+    # 8. repair is ordered: global <= projection <= sum
+    recs = MashEngine(units, score="delta_f", x0=x0, radius=R, mu=mu,
+                      Sigma=Sigma).dendrogram(max_steps=5)
+    cl = partition_at(H, [(r["survivor"], r["removed"]) for r in recs], 5)
+    errs = {}
+    for rep in ("sum", "projection", "kernel", "empirical"):
+        rows, biases, cols, keep, _ = realize(
+            units, ok, cl, repair=rep, mu=mu, Sigma=Sigma, Z=X)
+        errs[rep] = float(np.linalg.norm(layer_out(rows, biases, cols, X) - ref))
+    assert errs["kernel"] <= errs["projection"] + 1e-8, errs
+    assert errs["projection"] <= errs["sum"] + 1e-8, errs
+    assert errs["empirical"] <= errs["sum"] + 1e-8, errs
+
+    # 9. registry round-trip and parameter validation
+    from src.pruning.registry import build_pruning_method
+    for kind in ("mash", "mash_certified"):
+        build_pruning_method(kind)
+    for bad in ({"score": "nope"}, {"dictionary": "nope"}, {"repair": "nope"}):
+        try:
+            build_pruning_method("mash", **bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"expected ValueError for {bad}")
+
+    print("mash.py self-tests passed:")
+    print("  arc-cosine identity, c=+-1 branches, cross kernel vs Monte Carlo")
+    print("  mass gauge invariance; duplicate hyperplanes free in all 3 scores")
+    print("  duplicate merge exact to 1e-9; additive triples order-free")
+    print("  mass and covector sum conserved over a full sweep")
+    print("  certificate bounds the realized sup error on the box")
+    print("  repair ordering global <= projection <= sum (and empirical <= sum)")
+    print("  registry round-trip for mash / mash_certified + param validation")
+
+
+if __name__ == "__main__":
+    _selftest()
