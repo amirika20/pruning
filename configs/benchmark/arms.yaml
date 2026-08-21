@@ -1,0 +1,163 @@
+# The pruning arms of the benchmark, declaratively.
+#
+# `scripts/generate_benchmark_configs.py` crosses this with suite.yaml and emits
+# one runnable ExperimentConfig per (model, arm), skipping combinations the
+# method refuses. Editing this file changes the benchmark; the generated configs
+# are disposable.
+#
+# APPLICABILITY. `requires: fc` marks arms that only work where the prunable
+# layer is an nn.Linear (mlp, resmlp, transformer, vit, opt). The reasons differ
+# and are all deliberate refusals in the code, not gaps:
+#
+#   repair kernel/projection   evaluate their Grams in closed form under a
+#                              Gaussian over the layer's inputs; on conv that
+#                              means a patch covariance, which is both expensive
+#                              (d = C_in*k*k) and misspecified for im2col
+#                              patches (they are a blank-background spike plus
+#                              sparse rectified foreground, not Gaussian)
+#   data_free_merge, leo_pp    fully-connected by construction in both papers
+#   saturated always_on        re-solves the consumer's columns, so it needs the
+#                              activation Grams
+#   saturated interval         needs the layer-input box, which on conv lives on
+#                              patches
+#
+# Everything else -- every score, both dictionaries, sum and empirical repair --
+# runs on conv and BatchNorm.
+
+# ── explicit arms ────────────────────────────────────────────────────────────
+arms:
+
+  # -- controls ---------------------------------------------------------------
+  - name: random
+    kind: random
+    params: {seed: 0}
+    note: "the floor: how much is removable regardless of which units go"
+  - name: random_empirical
+    kind: random
+    params: {seed: 0, repair: empirical}
+    note: "with a global repair the survivor SPAN sets capacity, so this is the
+           sharpest test of whether any selection beats an arbitrary subset"
+
+  # -- magnitude, all four norms. The gap between `mass` and the rest measures
+  #    the gauge argument: a function-preserving rescale (w,b,c)->(tw,tb,c/t)
+  #    changes ||w|| and ||c|| but not the product.
+  - name: magnitude_mass
+    kind: magnitude
+    params: {norm: mass}
+  - name: magnitude_w
+    kind: magnitude
+    params: {norm: w}
+  - name: magnitude_c
+    kind: magnitude
+    params: {norm: c}
+  - name: magnitude_l1
+    kind: magnitude
+    params: {norm: l1}
+    note: "Li et al. ICLR 2017's filter criterion"
+  - name: magnitude_mass_empirical
+    kind: magnitude
+    params: {norm: mass, repair: empirical}
+
+  # -- saturated: the free tier -----------------------------------------------
+  - name: saturated_dead_empirical
+    kind: saturated
+    params: {mode: dead, criterion: empirical}
+  - name: saturated_dead_margin
+    kind: saturated
+    params: {mode: dead, criterion: margin, kappa: 4.0}
+  - name: saturated_dead_interval
+    kind: saturated
+    params: {mode: dead, criterion: interval}
+    requires: fc
+  - name: saturated_both_empirical
+    kind: saturated
+    params: {mode: both, criterion: margin, repair: empirical}
+    requires: fc
+
+  # -- our tolerance-driven tier ----------------------------------------------
+  - name: mash_certified
+    kind: mash_certified
+    params: {tol: 0.05, scale: mass}
+    note: "picks its own width from the certificate; sweep the tolerance, not
+           the width"
+
+  # -- external baselines -----------------------------------------------------
+  - name: osscar
+    kind: osscar
+    params: {}
+    note: "width comes from the sweep, not from params -- osscar validates that
+           exactly one of prune_fraction/n_remove is set, and the sweep injects
+           it per width (see src/experiments/sweep._width_params)"
+  - name: hope
+    kind: hope
+    params: {}
+  - name: hope_exact
+    kind: hope
+    params: {exact_kernel: true}
+    note: "eq. 83 truncated-bivariate cross-kernel instead of the paper's
+           zero-bias arc-cosine approximation"
+  - name: hope_prune_only
+    kind: hope
+    params: {allow_merge: false}
+  - name: data_free_merge
+    kind: data_free_merge
+    params: {}
+    requires: fc
+    note: "Srinivas & Babu BMVC 2015 -- the ancestor: same gauge argument,
+           keep-survivor dictionary, uncalibrated angular-vs-offset scale"
+  - name: leo_pp
+    kind: leo_pp
+    params: {certify: empirical}
+    requires: fc
+
+# ── the MASH grid: every scoring rule x merging rule x update ────────────────
+#
+# score      cylinder      pre-ReLU, domain-only (needs the input box only)
+#            delta_f       post-ReLU Ward form -- the operating criterion
+#            exact_damage  post-ReLU plus the merged unit and the fan-out Gram
+# dictionary merge         emit the new mass-weighted hyperplane
+#            medoid        keep each cluster's heaviest ORIGINAL unit
+# repair     sum           emit the accumulated column, no measure
+#            projection    per-cluster rank-1 least squares
+#            kernel        global least squares, closed-form Grams
+#            empirical     the same normal equations, sample-averaged Grams
+grids:
+  - prefix: mash
+    kind: mash
+    axes:
+      score: [cylinder, delta_f, exact_damage]
+      dictionary: [merge, medoid]
+      repair: [sum, projection, kernel, empirical]
+    # closed-form Grams are the FC-only half of the repair axis
+    requires_fc_when:
+      repair: [projection, kernel]
+
+  # the bias-compensation toggle, on the two repairs where it can matter
+  # (a global solve already zero-means its residual, so it is ~free there)
+  - prefix: mash_bias
+    kind: mash
+    fixed: {bias_fix: true}
+    axes:
+      score: [cylinder, delta_f]
+      dictionary: [merge]
+      repair: [sum, empirical]
+
+  # the gauge-correction toggle: emitting eta_C * sum(v) makes the merged unit
+  # the optimal affine surrogate; the unscaled sum overshoots its slope by
+  # 1/eta_C. Only observable under the sum rule -- a repair re-solves it away.
+  - prefix: mash_nogauge
+    kind: mash
+    fixed: {gauge_correct: false}
+    axes:
+      score: [cylinder, delta_f]
+      dictionary: [merge]
+      repair: [sum]
+
+  # cylinder radius: sup-norm (the operating choice) vs the mean-square radius
+  # the Ward identity is nominally stated at
+  - prefix: mash_radius
+    kind: mash
+    fixed: {score: cylinder, radius: l2}
+    axes:
+      dictionary: [merge]
+      repair: [sum, empirical]

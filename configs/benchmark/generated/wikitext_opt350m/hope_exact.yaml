@@ -1,0 +1,32 @@
+name: wikitext_opt350m__hope_exact
+notes: 'Benchmark cell: wikitext_opt350m x hope_exact. Pretrained weights downloaded; no training. Generated
+  by scripts/generate_benchmark_configs.py -- edit configs/benchmark/{suite,arms}.yaml, not this file.'
+data:
+  kind: wikitext
+  params:
+    tokenizer: facebook/opt-350m
+    seq_len: 512
+    n_train: 128
+    n_val: 32
+    n_test: null
+model:
+  kind: opt
+  params:
+    size: 350m
+    pretrained: true
+training:
+  epochs: 0
+pruning:
+  methods:
+  - kind: hope
+    params:
+      exact_kernel: true
+finetune:
+  epochs: 0
+seeds:
+- 0
+- 1
+- 2
+output_root: outputs/benchmark
+analyze_geometry: true
+deterministic: true

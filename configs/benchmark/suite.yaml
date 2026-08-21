@@ -1,0 +1,163 @@
+# The benchmark suite: every (dataset, model) the tables need.
+#
+# DOWNLOAD, DO NOT TRAIN. Every entry that has a published checkpoint sets
+# `pretrained: true` with `training.epochs: 0`, so the job loads weights and goes
+# straight to pruning. Weights cache under ~/.cache/torch (torchvision,
+# torch.hub) or ~/.cache/huggingface (OPT) on first use -- warm the caches on a
+# login node once, because compute nodes are often network-isolated and a job
+# that has to download will fail rather than wait.
+#
+# Only four entries have no checkpoint to fetch and must train: the MNIST /
+# Fashion-MNIST MLPs, the MNIST CNN, and the modular-arithmetic transformer.
+# All four are minutes on one GPU.
+#
+# `family` decides arm applicability (see arms.yaml): `fc` when the prunable
+# layer is an nn.Linear, `conv` when it is a Conv2d.
+#
+# `resources` selects the SLURM profile in scripts/slurm_*.sh.
+
+entries:
+
+  # ── trained here (no published checkpoint) ─────────────────────────────────
+  - name: mnist_mlp
+    family: fc
+    resources: small
+    train: true
+    data: {kind: mnist, params: {flatten: true, n_samples: 10000, train_ratio: 0.8}}
+    model: {kind: mlp, params: {hidden_sizes: [512, 256, 128]}}
+    training: {optimizer: adam, epochs: 60, lr: 1.0e-3, batch_size: 128, weight_decay: 1.0e-4}
+
+  - name: fashion_mnist_mlp
+    family: fc
+    resources: small
+    train: true
+    data: {kind: fashion_mnist, params: {flatten: true, n_samples: 10000, train_ratio: 0.8}}
+    model: {kind: mlp, params: {hidden_sizes: [512, 256, 128]}}
+    training: {optimizer: adam, epochs: 60, lr: 1.0e-3, batch_size: 128, weight_decay: 1.0e-4}
+
+  - name: mnist_cnn
+    family: conv
+    resources: small
+    train: true
+    data: {kind: mnist, params: {flatten: false, n_samples: 10000, train_ratio: 0.8}}
+    model: {kind: cnn, params: {hidden_sizes: [32, 64, 128], input_channels: 1}}
+    training: {optimizer: adam, epochs: 40, lr: 1.0e-3, batch_size: 128, weight_decay: 1.0e-4}
+
+  - name: modular_transformer
+    family: fc
+    resources: small
+    train: true
+    data: {kind: modular_add, params: {p: 97, train_ratio: 0.8}}
+    model: {kind: transformer, params: {d_model: 128, n_heads: 4, n_layers: 2, d_ff: 512}}
+    training: {optimizer: adamw, epochs: 400, lr: 1.0e-3, batch_size: 512, weight_decay: 1.0}
+
+  # ── CIFAR-10: downloaded (chenyaofo/pytorch-cifar-models via torch.hub) ────
+  - name: cifar10_resnet20
+    family: conv
+    resources: medium
+    data: {kind: cifar10, params: {n_samples: 10000, train_ratio: 0.8, n_test: 10000}}
+    model: {kind: resnet_cifar, params: {depth: 20, pretrained: true}}
+
+  - name: cifar10_resnet56
+    family: conv
+    resources: medium
+    data: {kind: cifar10, params: {n_samples: 10000, train_ratio: 0.8, n_test: 10000}}
+    model: {kind: resnet_cifar, params: {depth: 56, pretrained: true}}
+
+  # ── ImageNet-1k: downloaded (torchvision) ─────────────────────────────────
+  # Point data.params.root at the cluster's ImageNet; n_test drives the accuracy
+  # estimate, and the -1pt tolerance needs >= 2000 val images to be meaningful.
+  - name: imagenet_resnet18
+    family: conv
+    resources: large
+    data: {kind: imagenet, params: {root: PLACEHOLDER_IMAGENET_ROOT, n_samples: 20000,
+                                    train_ratio: 0.9, n_test: 10000, image_size: 224}}
+    model: {kind: resnet_imagenet, params: {depth: 18, pretrained: true}}
+
+  - name: imagenet_resnet50
+    family: conv
+    resources: large
+    data: {kind: imagenet, params: {root: PLACEHOLDER_IMAGENET_ROOT, n_samples: 20000,
+                                    train_ratio: 0.9, n_test: 10000, image_size: 224}}
+    model: {kind: resnet_imagenet, params: {depth: 50, pretrained: true}}
+
+  - name: imagenet_mobilenetv2
+    family: conv
+    resources: large
+    data: {kind: imagenet, params: {root: PLACEHOLDER_IMAGENET_ROOT, n_samples: 20000,
+                                    train_ratio: 0.9, n_test: 10000, image_size: 224}}
+    model: {kind: mobilenet_v2, params: {width_mult: 1.0, pretrained: true}}
+
+  - name: imagenet_vit_b16
+    family: fc
+    resources: large
+    data: {kind: imagenet, params: {root: PLACEHOLDER_IMAGENET_ROOT, n_samples: 20000,
+                                    train_ratio: 0.9, n_test: 10000, image_size: 224}}
+    model: {kind: vit, params: {variant: b_16, pretrained: true}}
+
+  # ── WikiText-2 / OPT: downloaded (HuggingFace) ────────────────────────────
+  # An FFN neuron is exactly the layer of the theory, so every FC arm applies.
+  # float32 footprint ~4 bytes/param: 1.3b ~5GB, 2.7b ~11GB, 6.7b ~27GB,
+  # 13b ~52GB before activations.
+  - name: wikitext_opt125m
+    family: fc
+    resources: medium
+    data: {kind: wikitext, params: {tokenizer: facebook/opt-125m, seq_len: 512,
+                                    n_train: 128, n_val: 32, n_test: null}}
+    model: {kind: opt, params: {size: 125m, pretrained: true}}
+
+  - name: wikitext_opt350m
+    family: fc
+    resources: medium
+    data: {kind: wikitext, params: {tokenizer: facebook/opt-350m, seq_len: 512,
+                                    n_train: 128, n_val: 32, n_test: null}}
+    model: {kind: opt, params: {size: 350m, pretrained: true}}
+
+  - name: wikitext_opt1.3b
+    family: fc
+    resources: large
+    data: {kind: wikitext, params: {tokenizer: facebook/opt-1.3b, seq_len: 512,
+                                    n_train: 128, n_val: 32, n_test: null}}
+    model: {kind: opt, params: {size: 1.3b, pretrained: true}}
+
+  - name: wikitext_opt2.7b
+    family: fc
+    resources: large
+    data: {kind: wikitext, params: {tokenizer: facebook/opt-2.7b, seq_len: 512,
+                                    n_train: 128, n_val: 32, n_test: null}}
+    model: {kind: opt, params: {size: 2.7b, pretrained: true}}
+
+  - name: wikitext_opt6.7b
+    family: fc
+    resources: xlarge
+    data: {kind: wikitext, params: {tokenizer: facebook/opt-6.7b, seq_len: 512,
+                                    n_train: 128, n_val: 32, n_test: null}}
+    model: {kind: opt, params: {size: 6.7b, pretrained: true}}
+
+  - name: wikitext_opt13b
+    family: fc
+    resources: xlarge
+    data: {kind: wikitext, params: {tokenizer: facebook/opt-13b, seq_len: 512,
+                                    n_train: 128, n_val: 32, n_test: null}}
+    model: {kind: opt, params: {size: 13b, pretrained: true}}
+
+# ── defaults applied to every generated config ──────────────────────────────
+defaults:
+  seeds: [0, 1, 2]
+  # No fine-tuning: the tables measure the surgery, not subsequent retraining.
+  finetune: {epochs: 0}
+  # Pretrained entries skip training entirely.
+  training_pretrained: {epochs: 0}
+  analyze_geometry: true
+  deterministic: true
+  output_root: outputs/benchmark
+
+# Seeds vary the calibration draw and the evaluation split, not the weights, for
+# pretrained entries -- so one seed is enough where a download fixes the model
+# AND the arm is deterministic. The big LMs get one to keep the queue honest.
+seed_overrides:
+  wikitext_opt2.7b: [0]
+  wikitext_opt6.7b: [0]
+  wikitext_opt13b: [0]
+  imagenet_resnet50: [0]
+  imagenet_vit_b16: [0]

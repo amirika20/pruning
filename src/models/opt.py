@@ -23,7 +23,17 @@ import torch.nn as nn
 from src.data.registry import DatasetBundle
 from src.models.registry import MergeOp, PrunableModel, register_model
 
-OPT_SIZES = {"125m": "facebook/opt-125m", "350m": "facebook/opt-350m", "1.3b": "facebook/opt-1.3b"}
+# Sizes the paper's OPT table sweeps. Weights download to ~/.cache/huggingface;
+# float32 footprint is ~4 bytes/param, so 6.7b needs ~27GB and 13b ~52GB of
+# device memory before activations -- size the SLURM request accordingly.
+OPT_SIZES = {
+    "125m": "facebook/opt-125m",
+    "350m": "facebook/opt-350m",
+    "1.3b": "facebook/opt-1.3b",
+    "2.7b": "facebook/opt-2.7b",
+    "6.7b": "facebook/opt-6.7b",
+    "13b": "facebook/opt-13b",
+}
 
 
 class OPT(PrunableModel):
@@ -93,8 +103,8 @@ class OPT(PrunableModel):
 
 @register_model("opt")
 def build_opt(bundle: DatasetBundle, size: str = "125m", pretrained: bool = True) -> OPT:
-    """OPT-{125m, 350m, 1.3b}, pretrained only (~250MB/650MB/2.6GB download,
-    cached under ~/.cache/huggingface)."""
+    """OPT, pretrained only (see OPT_SIZES); weights cache under
+    ~/.cache/huggingface on first use."""
     if not pretrained:
         raise ValueError(
             "opt is pretrained-only: this repo has no causal-LM training loop. "

@@ -1,0 +1,36 @@
+name: fashion_mnist_mlp__magnitude_l1
+notes: 'Benchmark cell: fashion_mnist_mlp x magnitude_l1. Trained here (no published checkpoint). Generated
+  by scripts/generate_benchmark_configs.py -- edit configs/benchmark/{suite,arms}.yaml, not this file.'
+data:
+  kind: fashion_mnist
+  params:
+    flatten: true
+    n_samples: 10000
+    train_ratio: 0.8
+model:
+  kind: mlp
+  params:
+    hidden_sizes:
+    - 512
+    - 256
+    - 128
+training:
+  optimizer: adam
+  epochs: 60
+  lr: 0.001
+  batch_size: 128
+  weight_decay: 0.0001
+pruning:
+  methods:
+  - kind: magnitude
+    params:
+      norm: l1
+finetune:
+  epochs: 0
+seeds:
+- 0
+- 1
+- 2
+output_root: outputs/benchmark
+analyze_geometry: true
+deterministic: true

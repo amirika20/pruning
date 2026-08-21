@@ -3,3 +3,13 @@ __pycache__/
 outputs/
 arxiv/
 data_cache/
+
+# LaTeX build artifacts
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.blg

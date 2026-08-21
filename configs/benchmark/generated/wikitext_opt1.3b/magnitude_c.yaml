@@ -1,0 +1,32 @@
+name: wikitext_opt1.3b__magnitude_c
+notes: 'Benchmark cell: wikitext_opt1.3b x magnitude_c. Pretrained weights downloaded; no training. Generated
+  by scripts/generate_benchmark_configs.py -- edit configs/benchmark/{suite,arms}.yaml, not this file.'
+data:
+  kind: wikitext
+  params:
+    tokenizer: facebook/opt-1.3b
+    seq_len: 512
+    n_train: 128
+    n_val: 32
+    n_test: null
+model:
+  kind: opt
+  params:
+    size: 1.3b
+    pretrained: true
+training:
+  epochs: 0
+pruning:
+  methods:
+  - kind: magnitude
+    params:
+      norm: c
+finetune:
+  epochs: 0
+seeds:
+- 0
+- 1
+- 2
+output_root: outputs/benchmark
+analyze_geometry: true
+deterministic: true
