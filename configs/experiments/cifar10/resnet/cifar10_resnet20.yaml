@@ -1,5 +1,5 @@
 name: cifar10_resnet20
-notes: "ResNet-20 (CIFAR-style, He et al. 2016) on CIFAR-10; silent + redundant filter pruning, then fine-tune. Other sizes: depth 32/44/56/110."
+notes: "ResNet-20 (CIFAR-style, He et al. 2016) on CIFAR-10; saturated (dead-unit) filter pruning, then fine-tune. Other sizes: depth 32/44/56/110."
 
 data:
   kind: cifar10
@@ -23,11 +23,10 @@ training:
 
 pruning:
   methods:
-    - kind: silent
-    - kind: redundant
+    - kind: saturated
       params:
-        orientation_threshold: 0.1
-        magnitude_threshold: 0.1
+        mode: dead          # dead units are exactly free to remove
+        criterion: empirical
 
 finetune:
   optimizer: adam

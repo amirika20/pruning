@@ -66,7 +66,7 @@ layer-output error of any merge — the sub-axis is **which measure** defines E.
 | ID | option | tier | status | notes |
 |---|---|---|---|---|
 | 1C1 | Srinivas–Babu saliency (`⟨a²⟩·ε²`) | DF | [repo] | baseline (`data_free_merge`) |
-| 1C2 | angle+offset thresholds | DF | [repo] | baseline (`redundant`; has the `abs()` sign bug — fix before benchmarking) |
+| 1C2 | angle+offset thresholds | DF | [removed] | was `redundant`; deleted 2026-08-20 — it had the `abs()` sign bug (accepted antiparallel normals) and no surgery at all, and it is the degenerate version of 1A1's cylinder score. Recover from git history if a naive-threshold baseline is ever wanted |
 | 1C3 | activation-pattern overlap (Hamming distance of masks on calibration batch) | DD | [idea] | classic data-dependent baseline |
 | 1C4 | OBS/Hessian saliency | DD | [idea] | baseline only if OSSCAR comparison needs it |
 | 1C5 | joint two-layer spectral perturbation (score = Gram damage of layer ℓ **and** ℓ+1 from the surgery) | DOM | [idea] | addresses c-direction blindness of 1A |
@@ -334,6 +334,111 @@ dispersion. Cheap to get right — F2 is closed-form and strictly better than F1
   the CERTIFIED tier (deletions carry no certificate — merges do, so the
   merge dictionary is forced there) and conv models with empirical Grams
   (E13 regime). Next: repair-aware merge scoring; unified-on-CNN.
+
+- **E15** (ward pushed through Phases B and D, `phase_b.py --arms func_matched
+  ward` and the new `ward_sum`/`ward_global` arms in `phase_d.py`, mnist+fashion,
+  3 seeds, joint equal fractions): **the value of the 128 samples is in the
+  REPAIR, not the selection.** Under global repair (4F4) ward selection matches
+  func_matched at -1pt/-2pt on mnist exactly on both grids
+  (0.772/0.810 in B; 0.712/0.790 in D) and is within one grid step on fashion
+  (D: 0.712 vs 0.790). Under weak repair ward loses badly and dataset-dependently
+  (fashion sum 0.393 vs 0.547 in B; ward_sum 0.330 vs osscar 0.790 in D).
+  Deltas at -1pt from ward_sum -> ward_global: +0.078 mnist, +0.382 fashion.
+  ward_global lands within one grid step of osscar128 on both datasets.
+  -> This extends E14 along a new axis: E14 killed the DICTIONARY's advantage
+  under global repair, E15 kills the SELECTION criterion's. The survivor SPAN
+  sets capacity, and the domain-only geometric criterion finds an equally good
+  span. Corollary for the paper: `Ours_cert` (ward+sum) is genuinely weak
+  (0.33-0.63 vs OSSCAR 0.79) and must be sold as a certificate, not a capacity
+  result; ward+global is a legitimate mixed tier (domain-only selection,
+  data-light repair) worth a table column.
+  MECHANISM found on fashion under sum surgery: ward's `survivor+sum` ==
+  `mean+sum` bit-identically (0.353/0.393/0.547) -- the merged hyperplane buys
+  ward NOTHING -- while func_matched's mean is worth +12pts over keep-survivor
+  (0.547 vs 0.429). Ward's worst-case geometric tightness is misaligned with
+  realized function (per E2/E4), so its clusters are tight by its own metric yet
+  functionally dispersed, making the mean unit no better than an arbitrary
+  survivor. This is the E10 conv failure ("mean-filters of dissimilar members
+  are garbage") reproduced on an MLP by swapping ONLY the selection criterion.
+  CAVEAT (blocks quoting these numbers in a table): `capacity()` takes the MAX
+  passing width, not the first crossing, so a denser grid reads systematically
+  higher when the accuracy curve oscillates near the tolerance -- B's 25-point
+  and D's 12-point grids disagree on fashion ward_global@-0.5pt (0.772 vs
+  0.484) for that reason alone. Switch to first-crossing before finals.
+
+- **E16** (ward-vs-func_matched removal-set overlap, `overlap_ward.py`,
+  mnist+fashion MLPs, 3 seeds, matched dendrogram cuts so both arms remove
+  exactly k units; OSSCAR at the same k as external reference):
+  **the two arms mostly pick the SAME units -- the selection gap is GROUPING,
+  except at layer 0 where it is genuinely the units.** ward&func_matched
+  overlap 0.61-0.94 (chance 0.25-0.75); excess over chance at f=0.25 is
+  +0.36 to +0.59.
+  (i) MNIST LAYER 0 is the one real expendability disagreement: ward&osscar
+  0.55/0.73/0.87 vs func_matched&osscar 0.88/0.94/0.91 at f=0.25/0.5/0.75 --
+  a 33pt gap at f=0.25, in the same cell where cap_err1 was 0.141 vs 0.376.
+  Confirms the E2/E4 measure diagnosis at the level of UNIT IDENTITY, not
+  just capacity: raw correlated pixels are where the isotropic/worst-case
+  metric picks the wrong units.
+  (ii) EVERYWHERE ELSE ward's units are as good as func_matched's by the
+  OSSCAR reference (fashion f=0.25: w&o 0.70/0.78/0.75 vs f&o 0.67/0.75/0.69
+  -- ward marginally AHEAD on all three layers) -- yet fashion is where
+  ward's sum-surgery capacity was worst (0.393 vs 0.547). So ward removes the
+  right units and puts them in the WRONG CLUSTERS; under the sum rule that
+  corrupts the merged hyperplane, which is why ward's survivor+sum ==
+  mean+sum bit-identically there (E15).
+  -> Three separable effects, previously conflated as "selection quality":
+  wrong units (layer 0, cured by the matched measure); right units / wrong
+  grouping (everywhere else, cured by global repair); and both irrelevant
+  once repair is global (E15 span-equivalence). Use this decomposition in
+  the paper's selection section instead of a single win/loss count.
+  CAVEAT: `ours_removed` reads "removed" as cluster members minus the
+  loudest -- a medoid reading. The actual mean+sum surgery keeps no member,
+  so this is a proxy for absorbability, not for what the surgery does.
+
+- **E17** (why ward groups wrongly, `why_ward_groups.py`, per-cluster outcome
+  vs causes at matched cuts, mnist+fashion, 3 seeds): **ward mis-ranks because
+  it measures the PRE-activation distance while the damage is POST-activation.
+  The gap is ReLU clipping -- the slack in the eq-14 inequality -- and it is
+  not fixable by any metric on the boundary geometry.**
+  Ladder on MNIST layer 0 (total relative layer error at f=0.25 / 0.50, and
+  number of multi-member clusters at f=0.25):
+      ward           (scalar R0, pre-ReLU)   0.001 / 0.007   42 clusters
+      ward_l2        (rho_2 = R0/sqrt(d+2))   0.001 / 0.010   45
+      ward_whitened  (exact Sigma^1/2, pre)   0.001 / 0.007   46
+      delta_F        (Ward form, POST-ReLU)   0.000 / 0.001    6
+      func_matched   (exact damage)           0.000 / 0.001    6
+  (i) Two geometric repairs FALSIFIED. `ward_l2` (1A5-adjacent; the mean-square
+  radius the Ward identity is actually stated at) is WORSE than ward in 10/12
+  cells despite cutting offset spread as designed. `ward_whitened` -- the
+  paper's Theorem-4.1 criterion, orientation block whitened by Sigma^1/2 -- is
+  a wash vs ward. Both reduce offset spread 2-3x and raise angular spread, and
+  the error does not improve: ward's accidentally heavy angular weighting is
+  near-optimal among cylinder variants. NOTE the code uses R0 (sup-norm radius)
+  where the paper states rho_2 / Sigma^1/2 -- a real paper/code discrepancy,
+  but empirically INERT, so fix it as bookkeeping, not as a result.
+  (ii) `delta_F` (the paper's Delta_F = A_kA_l/(A_k+A_l)*||phi_k-phi_l||^2,
+  described in the method doc but never implemented until now) reproduces
+  func_matched's error AND its cluster structure (6 vs 6 clusters, where the
+  ward variants make 42-46). Same Ward form, same weights -- only pre->post
+  ReLU changes. So clipping is the entire mechanism.
+  (iii) delta_F ~= func_matched everywhere => the merged unit's own response
+  and the fan-out Gram contribute ~nothing (confirms the flat `fan` column;
+  retires the unmeasured 1B sub-decision about including c).
+  MECHANISM: at MNIST layer 0 a large population of rarely-active units is
+  spread in BOTH orientation and offset, so every pre-ReLU metric refuses to
+  merge them, yet post-ReLU they are interchangeable. delta_F absorbs them
+  wholesale (its clusters have the HIGHEST offset spread of any arm, 1.092,
+  and the lowest fan-out cosine, 0.11 -- it merges what looks geometrically
+  worst). Ward spends its merges on small pairs among active units and pays
+  7x. This is also why ward's removal set disagrees with OSSCAR at layer 0
+  (E16: 0.55 vs 0.88) -- it never touches that block.
+  -> ACTIONS: make delta_F the primary functional criterion (simpler than
+  exact damage: pairwise, no merged unit, no fan-out Gram, equally good).
+  And a STRUCTURAL limit for the paper: any weights-only criterion is
+  necessarily pre-ReLU, since knowing what is clipped requires the measure --
+  so `Ours_cert` cannot be fixed by better geometry. Raises the value of
+  testing HOPE's BN+MaxEnt surrogate, whose kernel IS post-ReLU and whose
+  measure claims to be data-free (see notes on arXiv:2607.21366).
 
 ## Experiment protocol
 

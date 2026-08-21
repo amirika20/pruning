@@ -1,5 +1,5 @@
 name: fashion_mnist_flat_resmlp
-notes: "ResMLP (residual MLP) on flattened Fashion-MNIST [N, 784]; silent + redundant pruning, then fine-tune"
+notes: "ResMLP (residual MLP) on flattened Fashion-MNIST [N, 784]; saturated (dead-unit) pruning, then fine-tune"
 
 data:
   kind: fashion_mnist
@@ -23,11 +23,10 @@ training:
 
 pruning:
   methods:
-    - kind: silent
-    - kind: redundant
+    - kind: saturated
       params:
-        orientation_threshold: 0.1
-        magnitude_threshold: 0.1
+        mode: dead          # dead units are exactly free to remove
+        criterion: empirical
 
 finetune:
   optimizer: adam

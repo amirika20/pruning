@@ -1,5 +1,5 @@
 name: modular_transformer
-notes: "2-layer transformer on (a+b) mod 97; redundant FFN-neuron pruning only, then fine-tune"
+notes: "2-layer transformer on (a+b) mod 97; dead FFN-neuron pruning only, then fine-tune"
 
 data:
   kind: modular_add
@@ -25,10 +25,10 @@ training:
 
 pruning:
   methods:
-    - kind: redundant
+    - kind: saturated
       params:
-        orientation_threshold: 0.1
-        magnitude_threshold: 0.1
+        mode: dead          # dead units are exactly free to remove
+        criterion: empirical
 
 finetune:
   optimizer: adamw

@@ -64,7 +64,7 @@ class TrainingConfig:
 
 @dataclass
 class PruneMethodConfig:
-    # Name registered in src.pruning.registry, e.g. "silent", "redundant".
+    # Name registered in src.pruning.registry, e.g. "saturated", "mash".
     kind: str
     # Keyword arguments forwarded to the registered method's constructor.
     params: dict[str, Any] = field(default_factory=dict)

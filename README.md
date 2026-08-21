@@ -51,9 +51,8 @@ training:  {optimizer: sgd, epochs: 500, lr: 1.0e-3, batch_size: 64, weight_deca
 
 pruning:
   methods:                    # applied in order to every prunable layer;
-    - kind: silent            # later methods never re-select earlier picks
-    - kind: redundant
-      params: {orientation_threshold: 0.1, magnitude_threshold: 0.1}
+    - kind: saturated         # later methods never re-select earlier picks
+      params: {mode: dead, criterion: empirical}
 
 finetune:  {optimizer: adam, epochs: 500, lr: 1.0e-4, batch_size: 64, weight_decay: 1.0e-4, log_every: 10}
 
@@ -119,11 +118,18 @@ replaces the consumer's weights outright (reconstruction methods, e.g.
 
 Built-in methods:
 
-- **silent** — removes units that never produce a positive pre-ReLU activation
-  on any training input.
-- **redundant** — removes units whose hyperplanes nearly coincide with an
-  earlier unit's (parallel normals within `orientation_threshold`, offsets
-  within `magnitude_threshold`).
+- **saturated** — removes units whose pre-activation never changes sign on the
+  input region. *Dead* units (never active) contribute nothing, so removing them
+  is exactly free; *always-on* units are affine there, so removal folds their
+  constant into the consumer's bias and least-squares-repairs the rest.
+  Detection is `interval` (sound over the measured layer-input box), `margin`
+  (Gaussian tail on the pre-activation moments), or `empirical` (strict support
+  on the sample). A zero-energy guard additionally catches weight-collapsed
+  units, which no sign test can decide.
+- **mash** / **mash_certified** — Mass-weighted Aggregation of Structured
+  Hyperplanes: merge-based pruning, described in `src/pruning/methods/mash.py`.
+  `mash` takes a width, `mash_certified` takes an error tolerance and picks its
+  own width from a certificate.
 - **data_free_merge** — Srinivas & Babu, *Data-free Parameter Pruning for Deep
   Neural Networks* (BMVC 2015). Weight-sets are unit-normalized (ReLU
   homogeneity), pairs are ranked by the saliency

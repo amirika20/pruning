@@ -11,7 +11,7 @@
 `w·x + b = 0`, whose signed distance from the origin is `-b/||w|| = -beta`. If that
 hyperplane sits far outside the data cloud (|beta| large relative to the data scale),
 every training point lands on the same side of it — so the neuron is either always on
-or always off. Always-off neurons are prunable for free (the `silent` method); always-on
+or always off. Always-off neurons are prunable for free (the `saturated` method); always-on
 neurons are affine on the data and can be folded into the next layer. If |beta| alone
 predicts saturation, it is a **data-free** pruning score.
 

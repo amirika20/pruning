@@ -35,6 +35,14 @@ z_i = w_i^eff . x + b_i^eff, with any paired BatchNorm folded in exactly.
                three seeds), the extras being units active on a handful of
                points whose removal costs ~1e-5 in output.
 
+    empirical  strict support over the sampled inputs: max_n z <= 0 for dead,
+               min_n z > 0 for always-on. No model and no margin -- exactly the
+               "never fires on any training input" test, which is what the
+               retired `silent` method computed. Weakest guarantee of the three
+               (it says nothing about unsampled inputs) but it is the tightest
+               on the sample, so it is the one to use when reproducing an
+               empirical saturation count.
+
 SAMPLE SIZE IS NOT ONE NUMBER. Sample MOMENTS concentrate; sample SUPPORT does
 not. So `n_calib` (moments, repair Grams) can stay at ~128, while `n_box` -- the
 sample the region and the pre-activation statistics are measured from -- should
@@ -95,7 +103,7 @@ from src.pruning.registry import (
 from src.pruning.methods.mash import (
     TINY, UnitMoments, _layer_inputs, _relu_moments, extract_units)
 
-CRITERIA = ("interval", "margin")
+CRITERIA = ("interval", "margin", "empirical")
 REPAIRS = ("kernel", "empirical", "bias_only", "none")
 MODES = ("dead", "always_on", "both")
 
@@ -142,6 +150,8 @@ def classify(z: np.ndarray, criterion: str = "margin", kappa: float = 4.0,
             raise ValueError("criterion='interval' needs W, b and the input box")
         z_lo, z_hi = interval_bounds(W, b, box[0], box[1])
         return z_hi < 0.0, z_lo > 0.0
+    if criterion == "empirical":
+        return z.max(axis=0) <= 0.0, z.min(axis=0) > 0.0
     m, s = z.mean(axis=0), z.std(axis=0)
     return m + kappa * s < 0.0, m - kappa * s > 0.0
 
@@ -152,7 +162,7 @@ class SaturatedPruning(PruningMethod):
 
     params:
       mode         'dead' | 'always_on' | 'both'         (default 'both')
-      criterion    'interval' | 'margin'                 (default 'margin')
+      criterion    'interval' | 'margin' | 'empirical'   (default 'margin')
       kappa        margin multiplier, criterion='margin' (default 4.0)
       energy_tol   relative contribution energy below which a unit counts as
                    dead; catches weight-collapsed units (default 1e-10)
@@ -366,7 +376,7 @@ def _selftest() -> None:  # pragma: no cover
     bp[1] = +(np.abs(Wp[1]).sum() + 5.0)          # certainly always-on
     Zp = X @ Wp.T + bp
     for crit, kw in (("interval", dict(W=Wp, b=bp, box=(lo, hi))),
-                     ("margin", {})):
+                     ("margin", {}), ("empirical", {})):
         dead, always = classify(Zp, crit, kappa=4.0, **kw)
         assert dead[0] and not always[0], f"{crit}: planted dead unit missed"
         assert always[1] and not dead[1], f"{crit}: planted always-on unit missed"
@@ -459,6 +469,14 @@ def _selftest() -> None:  # pragma: no cover
     assert errs["kernel"] < errs["none"], errs
     assert errs["empirical"] < errs["none"], errs
     assert errs["bias_only"] <= errs["none"] * 1.05, errs
+
+    # 5b. criterion='empirical' reproduces the retired `silent` method exactly:
+    # dead iff the unit never produces a positive pre-activation on the sample.
+    zt = _preactivations(net, 0, Xt)
+    ever_active = (zt > 0).any(axis=0)
+    dead_e, _ = classify(zt, "empirical")
+    assert (dead_e == ~ever_active).all(), \
+        "criterion='empirical' must equal 'never fires on any input'"
 
     # 6. param validation
     for bad in ({"mode": "x"}, {"criterion": "x"}, {"repair": "x"},

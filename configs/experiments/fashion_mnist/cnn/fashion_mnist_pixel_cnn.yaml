@@ -1,5 +1,5 @@
 name: fashion_mnist_pixel_cnn
-notes: "CNN on pixel-space Fashion-MNIST [N, 1, 28, 28]; silent + redundant filter pruning, then fine-tune"
+notes: "CNN on pixel-space Fashion-MNIST [N, 1, 28, 28]; saturated (dead-unit) filter pruning, then fine-tune"
 
 data:
   kind: fashion_mnist
@@ -24,11 +24,10 @@ training:
 
 pruning:
   methods:
-    - kind: silent
-    - kind: redundant
+    - kind: saturated
       params:
-        orientation_threshold: 0.1
-        magnitude_threshold: 0.1
+        mode: dead          # dead units are exactly free to remove
+        criterion: empirical
 
 finetune:
   optimizer: adam
