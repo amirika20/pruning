@@ -5,7 +5,7 @@ notes: 'Benchmark cell: imagenet_vit_b16 x hope_prune_only. Pretrained weights d
 data:
   kind: imagenet
   params:
-    root: /n/netscratch/pehlevan_lab/Lab/akazeminia/pruning/data/imagenet
+    root: /n/holylfs06/LABS/kempner_shared/Everyone/testbed/vision/imagenet_1k
     n_samples: 20000
     train_ratio: 0.9
     n_test: 10000

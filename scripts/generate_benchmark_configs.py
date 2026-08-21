@@ -35,7 +35,7 @@ sys.path.insert(0, str(ROOT))
 
 BENCH = ROOT / "configs" / "benchmark"
 OUT = BENCH / "generated"
-PLACEHOLDER = "PLACEHOLDER_IMAGENET_ROOT"
+PLACEHOLDER = "PLACEHOLDER_IMAGENET_ROOT"   # none left in suite.yaml; kept for overrides
 
 
 # ── arm expansion ────────────────────────────────────────────────────────────
@@ -79,12 +79,13 @@ def build_config(entry: dict, arm: dict, defaults: dict,
                  seeds: list[int], imagenet_root: str | None) -> dict:
     data = {"kind": entry["data"]["kind"],
             "params": dict(entry["data"].get("params") or {})}
-    if data["params"].get("root") == PLACEHOLDER:
-        if not imagenet_root:
+    if "root" in data["params"]:
+        if data["params"]["root"] == PLACEHOLDER and not imagenet_root:
             raise ValueError(
                 f"{entry['name']} needs --imagenet-root (its data.params.root is "
                 f"still {PLACEHOLDER})")
-        data["params"]["root"] = imagenet_root
+        if imagenet_root:
+            data["params"]["root"] = imagenet_root
 
     trains = bool(entry.get("train"))
     training = (dict(entry.get("training") or {}) if trains
@@ -117,7 +118,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--imagenet-root", default=None,
-                    help="cluster path to the ImageNet/Imagenette directory")
+                    help="override the ImageNet path baked into suite.yaml")
     ap.add_argument("--only", nargs="*", default=None,
                     help="keep arms whose name starts with any of these")
     ap.add_argument("--models", nargs="*", default=None,

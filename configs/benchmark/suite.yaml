@@ -15,6 +15,10 @@
 # layer is an nn.Linear, `conv` when it is a Conv2d.
 #
 # `resources` selects the SLURM profile in scripts/slurm_*.sh.
+#
+# ImageNet-1k is read from the Kempner shared testbed
+# (/n/holylfs06/LABS/kempner_shared/Everyone/testbed/vision/imagenet_1k);
+# override with --imagenet-root if that path moves.
 
 entries:
 
@@ -70,28 +74,28 @@ entries:
   - name: imagenet_resnet18
     family: conv
     resources: large
-    data: {kind: imagenet, params: {root: PLACEHOLDER_IMAGENET_ROOT, n_samples: 20000,
+    data: {kind: imagenet, params: {root: /n/holylfs06/LABS/kempner_shared/Everyone/testbed/vision/imagenet_1k, n_samples: 20000,
                                     train_ratio: 0.9, n_test: 10000, image_size: 224}}
     model: {kind: resnet_imagenet, params: {depth: 18, pretrained: true}}
 
   - name: imagenet_resnet50
     family: conv
     resources: large
-    data: {kind: imagenet, params: {root: PLACEHOLDER_IMAGENET_ROOT, n_samples: 20000,
+    data: {kind: imagenet, params: {root: /n/holylfs06/LABS/kempner_shared/Everyone/testbed/vision/imagenet_1k, n_samples: 20000,
                                     train_ratio: 0.9, n_test: 10000, image_size: 224}}
     model: {kind: resnet_imagenet, params: {depth: 50, pretrained: true}}
 
   - name: imagenet_mobilenetv2
     family: conv
     resources: large
-    data: {kind: imagenet, params: {root: PLACEHOLDER_IMAGENET_ROOT, n_samples: 20000,
+    data: {kind: imagenet, params: {root: /n/holylfs06/LABS/kempner_shared/Everyone/testbed/vision/imagenet_1k, n_samples: 20000,
                                     train_ratio: 0.9, n_test: 10000, image_size: 224}}
     model: {kind: mobilenet_v2, params: {width_mult: 1.0, pretrained: true}}
 
   - name: imagenet_vit_b16
     family: fc
     resources: large
-    data: {kind: imagenet, params: {root: PLACEHOLDER_IMAGENET_ROOT, n_samples: 20000,
+    data: {kind: imagenet, params: {root: /n/holylfs06/LABS/kempner_shared/Everyone/testbed/vision/imagenet_1k, n_samples: 20000,
                                     train_ratio: 0.9, n_test: 10000, image_size: 224}}
     model: {kind: vit, params: {variant: b_16, pretrained: true}}
 
@@ -122,24 +126,39 @@ entries:
 
   - name: wikitext_opt2.7b
     family: fc
-    resources: large
+    resources: xlarge
     data: {kind: wikitext, params: {tokenizer: facebook/opt-2.7b, seq_len: 512,
                                     n_train: 128, n_val: 32, n_test: null}}
     model: {kind: opt, params: {size: 2.7b, pretrained: true}}
 
-  - name: wikitext_opt6.7b
-    family: fc
-    resources: xlarge
-    data: {kind: wikitext, params: {tokenizer: facebook/opt-6.7b, seq_len: 512,
-                                    n_train: 128, n_val: 32, n_test: null}}
-    model: {kind: opt, params: {size: 6.7b, pretrained: true}}
-
-  - name: wikitext_opt13b
-    family: fc
-    resources: xlarge
-    data: {kind: wikitext, params: {tokenizer: facebook/opt-13b, seq_len: 512,
-                                    n_train: 128, n_val: 32, n_test: null}}
-    model: {kind: opt, params: {size: 13b, pretrained: true}}
+  # ── DISABLED: above 2.7b until the greedy pass is subquadratic ────────────
+  # MashEngine.step() argmins over the whole H x H cost matrix every step, so
+  # the pass is O(H^3). Measured on one layer: 0.13s at H=512, 4.7s at 2048,
+  # 37s at 4096 -- x8 per doubling. Extrapolated whole-model PLAN time, before
+  # a single width is evaluated, and paid again by every arm that changes the
+  # score:
+  #     opt-1.3b (ffn 8192,  24L)   ~2 h     ok
+  #     opt-2.7b (ffn 10240, 32L)   ~5 h     ok on the 24h profile
+  #     opt-6.7b (ffn 16384, 32L)  ~21 h     no
+  #     opt-13b  (ffn 20480, 40L)  ~51 h     no
+  # No GPU fixes this -- the pass is host-side numpy. Caching per-row minima
+  # instead of rescanning makes it O(H^2) (seconds at H=20480); re-enable these
+  # two entries once that lands. Weights would also need an 80GB card: 13b is
+  # 48.4 GiB in fp32.
+  #
+  # - name: wikitext_opt6.7b
+  #   family: fc
+  #   resources: xlarge
+  #   data: {kind: wikitext, params: {tokenizer: facebook/opt-6.7b, seq_len: 512,
+  #                                   n_train: 128, n_val: 32, n_test: null}}
+  #   model: {kind: opt, params: {size: 6.7b, pretrained: true}}
+  #
+  # - name: wikitext_opt13b
+  #   family: fc
+  #   resources: xlarge
+  #   data: {kind: wikitext, params: {tokenizer: facebook/opt-13b, seq_len: 512,
+  #                                   n_train: 128, n_val: 32, n_test: null}}
+  #   model: {kind: opt, params: {size: 13b, pretrained: true}}
 
 # ── defaults applied to every generated config ──────────────────────────────
 defaults:
@@ -160,7 +179,5 @@ defaults:
 # AND the arm is deterministic. The big LMs get one to keep the queue honest.
 seed_overrides:
   wikitext_opt2.7b: [0]
-  wikitext_opt6.7b: [0]
-  wikitext_opt13b: [0]
   imagenet_resnet50: [0]
   imagenet_vit_b16: [0]

@@ -56,6 +56,29 @@ way and measured at a scale where the O(H^2) pass actually dominates.
       one fashion cell from grid density alone. Fix the definition when
       promoting, not after.
 
+## P0 — blocks the LM half of the benchmark
+
+- [ ] **Make the greedy pass subquadratic.** `MashEngine.step()` argmins over the
+      whole H x H cost matrix at every step, so a pass is O(H^3). Measured on one
+      layer: 0.13s at H=512, 0.45s at 1024, 4.73s at 2048, 37.2s at 4096 -- x8
+      per doubling. Extrapolated whole-model PLAN time, paid again by every arm
+      that changes the score:
+
+      | model | ffn_dim | layers | plan |
+      |---|---|---|---|
+      | opt-1.3b | 8192 | 24 | ~2 h |
+      | opt-2.7b | 10240 | 32 | ~5 h |
+      | opt-6.7b | 16384 | 32 | ~21 h |
+      | opt-13b | 20480 | 40 | ~51 h |
+
+      6.7b and 13b are consequently DISABLED in `configs/benchmark/suite.yaml`
+      (commented out with these numbers beside them). No GPU helps -- the pass is
+      host-side numpy. The fix is to cache per-row minima and refresh only the
+      rows whose minimum pointed at the merged pair, giving O(H^2) (seconds at
+      H=20480); it composes with the Lance--Williams update already in place.
+      Verify by asserting the new and old implementations produce IDENTICAL merge
+      sequences over a few hundred random layers, not merely similar capacities.
+
 ## P1 — needed before numbers are publishable
 
 - [x] **DONE (d163063).** ~~Random and magnitude baselines.~~ Table 2 has both columns; neither is
@@ -64,8 +87,11 @@ way and measured at a scale where the O(H^2) pass actually dominates.
       cheap; for M methods × N widths × S seeds training dominates. Key it on
       `config_digest(model, data, training) + seed` — `src/reproducibility.py`
       already exposes exactly that.
-- [ ] **Confirm every dataset is local before planning.** CIFAR-10 in particular
-      may not be cached. Standing rule: ask before any download.
+- [x] **DONE.** ~~Confirm every dataset is local.~~ ImageNet-1k is the Kempner
+      shared testbed copy at
+      `/n/holylfs06/LABS/kempner_shared/Everyone/testbed/vision/imagenet_1k`
+      (baked into suite.yaml). Everything else downloads; `scripts/warm_caches.py`
+      fetches the checkpoints from a login node.
 - [ ] **Promote OSSCAR's swap refinement into the conv recipe.** E13: swap closes
       the *residual* gap to OSSCAR completely on CNNs. Currently only reachable
       by composing `OSSCAR._local_search_stage` from
