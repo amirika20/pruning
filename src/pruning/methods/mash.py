@@ -77,11 +77,13 @@ for the numerical self-tests.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from scipy.special import ndtr, owens_t
 
 from src.models.registry import PrunableModel
@@ -266,13 +268,18 @@ class MashEngine:
     def __init__(self, units: Units, score: str = "delta_f",
                  x0: np.ndarray | None = None, radius: float | None = None,
                  mu: np.ndarray | None = None, Sigma: np.ndarray | None = None,
-                 gauge_correct: bool = True):
+                 gauge_correct: bool = True, measure: str = "gaussian",
+                 Z: np.ndarray | None = None):
         if score not in SCORES:
             raise ValueError(f"score must be one of {SCORES}, got {score!r}")
+        if measure not in ("gaussian", "empirical"):
+            raise ValueError("measure must be 'gaussian' or 'empirical'")
         if score == "cylinder" and (x0 is None or radius is None):
             raise ValueError("score='cylinder' needs the input box (x0, radius)")
-        if score != "cylinder" and (mu is None or Sigma is None):
+        if score != "cylinder" and measure == "gaussian" and (mu is None or Sigma is None):
             raise ValueError(f"score={score!r} needs calibration moments (mu, Sigma)")
+        if score != "cylinder" and measure == "empirical" and Z is None:
+            raise ValueError("measure='empirical' needs the layer inputs Z")
 
         self.orig = units
         self.score = score
@@ -293,8 +300,18 @@ class MashEngine:
         self.R = 0.0 if radius is None else float(radius)
         self.cert_terms = np.zeros(H)
 
+        self.measure = measure
         if score == "cylinder":
             self._radius = float(radius)
+        elif measure == "empirical":
+            # Exact under the empirical measure and free of any d x d
+            # covariance: keep the projections Z g^T, which are ADDITIVE under
+            # merging exactly as the triples are, so no d-dimensional work
+            # happens after initialization.
+            self._Z = np.asarray(Z, dtype=np.float64)
+            self._Zg = self._Z @ self.g.T                  # [N, H] -> stored .T
+            self._Zg = self._Zg.T                          # [H, N], additive
+            self._Phi = self._responses(np.arange(H))      # [H, N]
         else:
             self.mu = np.asarray(mu, dtype=np.float64)
             Sig = np.asarray(Sigma, dtype=np.float64)
@@ -304,6 +321,8 @@ class MashEngine:
             self._dotmu = self.g @ self.mu             # additive
             if score == "exact_damage":
                 self._W = self.w @ self.w.T            # additive
+        if score == "exact_damage" and measure == "empirical":
+            self._W = self.w @ self.w.T
         self._cost = self._all_costs()
 
     # -- codes -------------------------------------------------------------
@@ -314,6 +333,14 @@ class MashEngine:
 
     def _norms(self, idx: np.ndarray) -> np.ndarray:
         return np.linalg.norm(self.g[idx], axis=1)
+
+    def _responses(self, idx: np.ndarray) -> np.ndarray:
+        """Post-ReLU unit-gain responses of clusters `idx` on the calibration
+        rows, [len(idx), N]. Only defined for measure='empirical'."""
+        n = self._norms(idx)
+        safe = np.where(n > TINY, n, 1.0)
+        t = (self._Zg[idx] - self.r[idx][:, None]) / safe[:, None]
+        return np.maximum(np.where((n > TINY)[:, None], t, 0.0), 0.0)
 
     def _code(self, idx: np.ndarray, kind: str) -> tuple[np.ndarray, np.ndarray]:
         """(direction, offset-vs-x0) of clusters `idx`.
@@ -350,6 +377,29 @@ class MashEngine:
             qt = np.concatenate([self._radius * u, off[:, None]], axis=1)
             d2 = ((qt[1:] - qt[0]) ** 2).sum(axis=1)
             return self._ward_weight(k, idx) * d2
+
+        if self.measure == "empirical":
+            N = self._Phi.shape[1]
+            phik = self._Phi[k]
+            if self.score == "delta_f":
+                diff = self._Phi[idx] - phik[None, :]
+                d2 = (diff * diff).sum(axis=1) / max(N, 1)
+                return self._ward_weight(k, idx) * d2
+            # exact_damage: the candidate merged unit's own response is needed,
+            # and it too follows from the additive projections
+            gk_ = self._Zg[k][None, :] + self._Zg[idx]
+            rc = self.r[k] + self.r[idx]
+            nc = np.linalg.norm(self.g[k][None, :] + self.g[idx], axis=1)
+            safe = np.where(nc > TINY, nc, 1.0)
+            phic = np.maximum((gk_ - rc[:, None]) / safe[:, None], 0.0)
+            phil = self._Phi[idx]
+            ek = phik[None, :] - phic
+            el = phil - phic
+            wkk, wll = self._W[k, k], self._W[idx, idx]
+            wkl = self._W[k, idx]
+            cost = (wkk * (ek * ek).sum(1) + wll * (el * el).sum(1)
+                    + 2.0 * wkl * (ek * el).sum(1)) / max(N, 1)
+            return np.where(nc > TINY, np.clip(cost, 0.0, None), 0.0)
 
         nk = float(np.linalg.norm(self.g[k]))
         nl = self._norms(idx)
@@ -433,7 +483,15 @@ class MashEngine:
         self._cost[l, :] = np.inf
         self._cost[:, l] = np.inf
 
-        if self.score != "cylinder":
+        if self.score != "cylinder" and self.measure == "empirical":
+            self._Zg[k] += self._Zg[l]
+            self._Phi[k] = self._responses(np.array([k]))[0]
+            if self.score == "exact_damage":
+                rw = self._W[k, :] + self._W[l, :]
+                rw[k] = self._W[k, k] + 2.0 * self._W[k, l] + self._W[l, l]
+                self._W[k, :] = rw
+                self._W[:, k] = rw
+        elif self.score != "cylinder":
             row = self._D[k, :] + self._D[l, :]
             row[k] = self._D[k, k] + 2.0 * self._D[k, l] + self._D[l, l]
             self._D[k, :] = row
@@ -583,9 +641,35 @@ def realize(units: Units, ok: np.ndarray, clusters: list[list[int]],
 
 # ── the pruning methods ──────────────────────────────────────────────────────
 
-def _layer_inputs(model: PrunableModel, layer_idx: int,
-                  x: torch.Tensor) -> np.ndarray:
-    """Calibration inputs of the prunable layer, [N, d]."""
+def consumer_has_bias(model: PrunableModel, layer_idx: int) -> bool:
+    """Whether the consumer of this layer can absorb a constant.
+
+    Conv consumers in BatchNorm architectures are built with bias=False, so
+    there is nowhere to fold a residual mean. A repair that adjoins the constant
+    function to its dictionary must know this: solving WITH a constant and then
+    failing to apply it is worse than never adjoining it, because the solved
+    columns are then optimal for a network that includes an offset which is not
+    actually there.
+    """
+    try:
+        module = model.outgoing_module(layer_idx)
+    except NotImplementedError:
+        return False
+    return getattr(module, "bias", None) is not None
+
+
+def _layer_inputs(model: PrunableModel, layer_idx: int, x: torch.Tensor,
+                  max_rows: int = 20000) -> np.ndarray:
+    """What the layer's units see, one row per observation, [N, d].
+
+    Linear: one row per sample (or token). Conv: one row per IM2COL PATCH, so a
+    filter is a single unit on patch space and d = C_in*kH*kW -- extracted with
+    the layer's own kernel/stride/padding/dilation, so the zero padding a filter
+    actually sees is included. Patch counts explode (one per spatial position
+    per image), so rows are subsampled to `max_rows` with a fixed generator:
+    deterministic, and uniform rather than strided so it cannot alias with
+    spatial structure.
+    """
     layer = model.prunable_layer(layer_idx)
     grabbed: list[torch.Tensor] = []
     h = layer.register_forward_hook(lambda m, inp, out: grabbed.append(inp[0].detach()))
@@ -595,20 +679,33 @@ def _layer_inputs(model: PrunableModel, layer_idx: int,
     finally:
         h.remove()
     z = grabbed[0]
-    return z.reshape(-1, z.shape[-1]).double().cpu().numpy()
+    if isinstance(layer, nn.Conv2d):
+        # [N, d, L] with d = C_in*kH*kW in channel-major order, matching
+        # conv.weight.reshape(C_out, -1)
+        patches = F.unfold(z, layer.kernel_size, dilation=layer.dilation,
+                           padding=layer.padding, stride=layer.stride)
+        z = patches.permute(0, 2, 1).reshape(-1, patches.shape[1])
+    else:
+        z = z.reshape(-1, z.shape[-1])
+    out = z.double().cpu().numpy()
+    if len(out) > max_rows:
+        rng = np.random.default_rng(12345 + layer_idx)
+        out = out[rng.choice(len(out), max_rows, replace=False)]
+    return out
 
 
 class _MashBase(PruningMethod):
     """Shared plumbing: build the engine, cut it, realize, emit a decision."""
 
     score = "delta_f"
-    dictionary = "merge"
-    repair = "kernel"
+    dictionary = None          # None = auto: merge where it is safe, else medoid
+    repair = None              # None = auto: kernel on Linear, empirical on conv
 
     def __init__(self, score: str | None = None, dictionary: str | None = None,
                  repair: str | None = None, n_calib: int = 128,
                  gauge_correct: bool = True, bias_fix: bool = False,
-                 radius: str = "sup"):
+                 radius: str = "sup", measure: str | None = None,
+                 max_rows: int = 20000):
         if score is not None:
             self.score = score
         if dictionary is not None:
@@ -618,49 +715,92 @@ class _MashBase(PruningMethod):
         for name, val, allowed in (("score", self.score, SCORES),
                                    ("dictionary", self.dictionary, DICTIONARIES),
                                    ("repair", self.repair, REPAIRS)):
-            if val not in allowed:
+            if val is not None and val not in allowed:
                 raise ValueError(f"{name} must be one of {allowed}, got {val!r}")
         if radius not in ("sup", "l2"):
             raise ValueError("radius must be 'sup' or 'l2'")
+        if measure is not None and measure not in ("gaussian", "empirical"):
+            raise ValueError("measure must be 'gaussian', 'empirical' or None")
         self.n_calib = int(n_calib)
         self.gauge_correct = bool(gauge_correct)
         self.bias_fix = bool(bias_fix)
         self.radius = radius
+        # None = pick per layer type: gaussian on Linear, empirical on conv
+        self.measure = measure
+        self.max_rows = int(max_rows)
 
     # -- setup ------------------------------------------------------------
 
     def _prepare(self, model: PrunableModel, layer_idx: int, ctx: PruneContext):
         layer = model.prunable_layer(layer_idx)
-        if not isinstance(layer, nn.Linear):
+        is_conv = isinstance(layer, nn.Conv2d)
+        if not isinstance(layer, (nn.Linear, nn.Conv2d)):
             raise NotImplementedError(
-                "mash currently supports nn.Linear prunable layers; conv units "
-                "live on im2col patches and need patch-space moments (see "
-                "studies/gram_stability/resnet_phase_a.py)")
-        if self.dictionary == "merge" and model.prunable_bn(layer_idx) is not None:
-            raise NotImplementedError(
-                "dictionary='merge' synthesizes a hyperplane no original unit "
-                "realizes, so the paired BatchNorm's per-channel affine would "
-                "have to be rewritten too, which PrunableModel does not expose. "
-                "Use dictionary='medoid' on BatchNorm layers -- survivors keep "
-                "their original filters and BN slots.")
+                f"mash supports nn.Linear and nn.Conv2d prunable layers; "
+                f"layer {layer_idx} is a {type(layer).__name__}")
+
+        # Resolve the "auto" defaults against THIS layer, so one config can span
+        # a mixed architecture. A merged hyperplane cannot be written back
+        # through a paired BatchNorm (see below), and the closed-form repair
+        # needs a covariance over the layer's inputs, which on conv is patch
+        # space -- so the auto choices are the ones that are both valid and, per
+        # the recorded conv results, better there.
+        can_merge = (model.prunable_bn(layer_idx) is None
+                     and (not is_conv or layer.bias is not None))
+        self.dictionary = self.dictionary or ("merge" if can_merge else "medoid")
+        self.repair = self.repair or ("empirical" if is_conv else "kernel")
+
+        if self.dictionary == "merge":
+            if model.prunable_bn(layer_idx) is not None:
+                raise NotImplementedError(
+                    "dictionary='merge' synthesizes a hyperplane no original "
+                    "unit realizes. Its parameters are the BN-FOLDED ones, so "
+                    "writing them into the layer while the paired BatchNorm "
+                    "still applies would double-count the normalization, and "
+                    "rewriting the BN's per-channel affine is not something "
+                    "PrunableModel exposes. Use dictionary='medoid' on "
+                    "BatchNorm layers: survivors keep their original filters "
+                    "AND their BN slots, so nothing has to be rewritten -- and "
+                    "on BN-trained filters it is the better arm anyway.")
+            if is_conv and layer.bias is None:
+                raise NotImplementedError(
+                    "dictionary='merge' needs somewhere to put the merged "
+                    "unit's offset, and this conv has bias=False. Use "
+                    "dictionary='medoid'.")
 
         units, ok = extract_units(model, layer_idx)
         idx_map = np.flatnonzero(ok)
         frozen = np.flatnonzero(~ok)
         sub = units.subset(idx_map)
 
-        needs_data = (self.score != "cylinder"
-                      or self.repair in ("projection", "kernel", "empirical")
-                      or self.bias_fix)
-        Z = mu = Sigma = None
-        if needs_data or True:                    # the box is cheap; always get Z
-            Z = _layer_inputs(model, layer_idx, ctx.train_inputs[: self.n_calib])
-            mu, Sigma = Z.mean(axis=0), np.atleast_2d(np.cov(Z.T))
+        # On conv the observation space is im2col patches, whose dimension
+        # d = C_in*kH*kW runs into the thousands. Forming the d x d covariance
+        # the Gaussian scores need is then both slow and large, and E10 found
+        # that patch measure to be badly misspecified anyway (a blank-background
+        # atom plus sparse rectified foreground). So conv scores empirically:
+        # exact under the calibration sample, and no d x d anything.
+        measure = self.measure or ("empirical" if is_conv else "gaussian")
+        if is_conv and self.repair in ("kernel", "projection"):
+            raise NotImplementedError(
+                f"repair={self.repair!r} evaluates its Grams in closed form "
+                "under a Gaussian over the layer's inputs, which on conv means "
+                "a patch-space covariance -- expensive and, per the recorded "
+                "conv study, misspecified. Use repair='empirical' (the same "
+                "normal equations from sample averages) or 'sum'.")
+
+        Z = _layer_inputs(model, layer_idx, ctx.train_inputs[: self.n_calib],
+                          max_rows=self.max_rows)
+        mu = Z.mean(axis=0)
+        Sigma = None
+        if measure == "gaussian" or self.repair in ("kernel", "projection") \
+                or self.bias_fix:
+            Sigma = np.atleast_2d(np.cov(Z.T))
         x0 = (Z.min(axis=0) + Z.max(axis=0)) / 2.0
         half = (Z.max(axis=0) - Z.min(axis=0)) / 2.0
         R = float(np.linalg.norm(half))
         rad = R if self.radius == "sup" else R / np.sqrt(Z.shape[1] + 2.0)
-        return units, ok, idx_map, frozen, sub, Z, mu, Sigma, x0, R, rad
+        return (units, ok, idx_map, frozen, sub, Z, mu, Sigma, x0, R, rad,
+                measure)
 
     @staticmethod
     def _diagnostics(units, H, clusters, keep, recs, idx_map, cert=None):
@@ -711,30 +851,61 @@ class _MashBase(PruningMethod):
               Z, mu, Sigma, recs=None, cert=None) -> PruneDecision:
         clusters = [[int(idx_map[i]) for i in cl] for cl in clusters_sub] \
             + [[int(f)] for f in frozen]
+        bias_fix = self.bias_fix and consumer_has_bias(model, layer_idx)
+        if self.bias_fix and not bias_fix:
+            logging.warning(
+                f"  layer {layer_idx}: bias_fix requested but the consumer has "
+                "no bias term (typical of conv+BatchNorm), so the residual mean "
+                "cannot be folded; continuing without it")
         rows, biases, cols, keep, delta = realize(
             units, ok, clusters, dictionary=self.dictionary, repair=self.repair,
             gauge_correct=self.gauge_correct, mu=mu, Sigma=Sigma, Z=Z,
-            bias_fix=self.bias_fix)
+            bias_fix=bias_fix)
 
         H, d = units.u.shape
+        # `cols` are EFFECTIVE outgoing weights v = alpha * c, so the consumer
+        # column depends on what gain the surviving unit ends up with:
+        #
+        #   merge   we rewrite the layer's rows to the unit-gain hyperplane, so
+        #           alpha becomes 1 and the effective weight IS the column.
+        #   medoid  the survivor keeps its ORIGINAL row -- and, crucially, its
+        #           original BatchNorm slot -- so its gain is still alpha_slot
+        #           and the column must be divided by it. Emitting no incoming
+        #           weights at all is what makes the medoid dictionary work
+        #           under BN without any BN write-back.
+        rewrite_incoming = self.dictionary == "merge"
         W_new = units.u.copy()
         b_new = -units.rho.copy()
         C_new = units.C.copy()
         remove: list[int] = []
         for cl, slot, row, bias, col in zip(clusters, keep, rows, biases, cols):
-            W_new[slot] = row
-            b_new[slot] = bias
-            C_new[slot] = col
+            if rewrite_incoming:
+                W_new[slot] = row
+                b_new[slot] = bias
+                C_new[slot] = col
+            else:
+                a = units.alpha[slot]
+                C_new[slot] = col / (a if a > TINY else 1.0)
             remove.extend(int(i) for i in cl if int(i) != slot)
 
-        # undo the unit-gain gauge: the layer's rows carry alpha = 1 now, so the
-        # emitted column IS the effective outgoing weight.
+        # A conv consumer reads each channel through kH*kW taps, so
+        # outgoing_weights is [H*kk, fan_out] while we carry [H, kk*fan_out].
+        # The internal layout is that flattened block per channel, so a reshape
+        # restores what set_outgoing_weights expects.
+        ow = model.outgoing_weights(layer_idx)
+        C_out = C_new
+        if ow.shape[0] != H:
+            C_out = C_new.reshape(ow.shape[0], ow.shape[1])
+
         dec = PruneDecision(
             remove=sorted(remove),
-            new_incoming=(torch.from_numpy(W_new), torch.from_numpy(b_new)),
-            new_outgoing=torch.from_numpy(C_new),
+            new_outgoing=torch.from_numpy(np.ascontiguousarray(C_out)),
             diagnostics=self._diagnostics(units, H, clusters, keep, recs or [],
                                           idx_map, cert))
+        if rewrite_incoming:
+            layer = model.prunable_layer(layer_idx)
+            W_t = torch.from_numpy(W_new).view_as(layer.weight)
+            dec.new_incoming = (W_t, torch.from_numpy(b_new))
         if delta is not None:
             dec.bias_delta = torch.from_numpy(delta)
         return dec
@@ -765,7 +936,7 @@ class MASH(_MashBase):
     def select(self, model: PrunableModel, layer_idx: int,
                ctx: PruneContext) -> PruneDecision:
         (units, ok, idx_map, frozen, sub, Z, mu, Sigma,
-         x0, R, rad) = self._prepare(model, layer_idx, ctx)
+         x0, R, rad, measure) = self._prepare(model, layer_idx, ctx)
         H = len(idx_map)
         want = (self.n_remove if self.fraction is None
                 else int(round(self.fraction * (H - 1))))
@@ -773,7 +944,8 @@ class MASH(_MashBase):
         if budget <= 0:
             return PruneDecision(remove=[])
         eng = MashEngine(sub, score=self.score, x0=x0, radius=rad, mu=mu,
-                         Sigma=Sigma, gauge_correct=self.gauge_correct)
+                         Sigma=Sigma, gauge_correct=self.gauge_correct,
+                         measure=measure, Z=Z)
         recs = eng.dendrogram(max_steps=budget)
         pairs = [(r["survivor"], r["removed"]) for r in recs]
         clusters = partition_at(H, pairs, len(pairs))
@@ -804,7 +976,7 @@ class MASHCertified(_MashBase):
     """
 
     score = "cylinder"
-    dictionary = "merge"
+    dictionary = None          # auto: merge where safe, medoid under BatchNorm
     repair = "sum"
 
     def __init__(self, tol: float = 0.05, scale: str = "mass",
@@ -819,12 +991,13 @@ class MASHCertified(_MashBase):
     def select(self, model: PrunableModel, layer_idx: int,
                ctx: PruneContext) -> PruneDecision:
         (units, ok, idx_map, frozen, sub, Z, mu, Sigma,
-         x0, R, rad) = self._prepare(model, layer_idx, ctx)
+         x0, R, rad, measure) = self._prepare(model, layer_idx, ctx)
         H = len(idx_map)
         if H <= 1:
             return PruneDecision(remove=[])
         eng = MashEngine(sub, score=self.score, x0=x0, radius=rad, mu=mu,
-                         Sigma=Sigma, gauge_correct=self.gauge_correct)
+                         Sigma=Sigma, gauge_correct=self.gauge_correct,
+                         measure=measure, Z=Z)
         if self.scale == "mass":
             denom = eng.mass_total()
         else:
@@ -965,6 +1138,62 @@ def _selftest() -> None:  # pragma: no cover
         else:
             raise AssertionError(f"expected ValueError for {bad}")
 
+    # 10. Conv + BatchNorm end to end. The merged dictionary is refused here on
+    # purpose (a folded hyperplane cannot be written back through the BN), the
+    # medoid dictionary must work, and zero removals must be bit-exact.
+    from torch.utils.data import TensorDataset
+
+    from src.config import PruningConfig
+    from src.models.cnn import CNN
+    from src.pruning.surgery import prune_model
+
+    torch.manual_seed(0)
+    cnet = CNN(hidden_sizes=[8, 12], input_channels=1, output_dim=3).eval()
+    Xc = torch.randn(6, 1, 12, 12)
+
+    class _CB:
+        train_ds = TensorDataset(Xc, torch.zeros(len(Xc), dtype=torch.long))
+
+    cb = _CB()
+    with torch.no_grad():
+        cref = cnet(Xc).double()
+
+    def _run(**params):
+        class _M:
+            kind = "mash"
+        _M.params = params
+        out, _ = prune_model(cnet, PruningConfig(methods=[_M()]), cb,
+                             torch.device("cpu"))
+        return out
+
+    zero = _run(n_remove=0, dictionary="medoid")
+    with torch.no_grad():
+        e0 = float((zero(Xc).double() - cref).abs().max())
+    assert e0 == 0.0, f"conv zero-removal must be bit-exact, got {e0:.2e}"
+
+    widths0 = [cnet.prunable_layer(i).weight.shape[0]
+               for i in range(cnet.n_prunable_layers())]
+    got = _run(fraction=0.25, dictionary="medoid", repair="empirical")
+    widths1 = [got.prunable_layer(i).weight.shape[0]
+               for i in range(got.n_prunable_layers())]
+    assert widths1 == [int(round(0.75 * w)) for w in widths0], (widths0, widths1)
+    with torch.no_grad():
+        got(Xc)                                   # must still forward
+    # BN slots must stay in the mode they were in
+    assert not got.prunable_bn(0).training, "pruned BN left in train mode"
+
+    # patch extraction: one row per im2col patch, d = C_in*kH*kW
+    Zc = _layer_inputs(cnet, 1, Xc)
+    lay1 = cnet.prunable_layer(1)
+    assert Zc.shape[1] == lay1.in_channels * int(np.prod(lay1.kernel_size)), Zc.shape
+    # the auto default must refuse to merge under BN, and say why
+    try:
+        _run(fraction=0.25, dictionary="merge")
+    except NotImplementedError as exc:
+        assert "medoid" in str(exc)
+    else:
+        raise AssertionError("merge under BatchNorm must be refused")
+
     print("mash.py self-tests passed:")
     print("  arc-cosine identity, c=+-1 branches, cross kernel vs Monte Carlo")
     print("  mass gauge invariance; duplicate hyperplanes free in all 3 scores")
@@ -973,6 +1202,8 @@ def _selftest() -> None:  # pragma: no cover
     print("  certificate bounds the realized sup error on the box")
     print("  repair ordering global <= projection <= sum (and empirical <= sum)")
     print("  registry round-trip for mash / mash_certified + param validation")
+    print("  conv+BN: patch extraction, medoid path, bit-exact zero removal,")
+    print("    BN mode preserved, merge-under-BN refused with a pointer")
 
 
 if __name__ == "__main__":

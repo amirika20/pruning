@@ -136,7 +136,8 @@ class MobileNetV2(PrunableModel):
 
     def outgoing_weights(self, idx: int) -> torch.Tensor:
         conv = self.outgoing_module(idx)
-        return conv.weight.reshape(conv.out_channels, -1).t()  # [hidden, oup] (1x1 -> kk=1)
+        # .detach(): callers convert this to numpy, and a grad-tracking view raises
+        return conv.weight.detach().reshape(conv.out_channels, -1).t()  # [hidden, oup]
 
     def set_outgoing_weights(self, idx: int, new_weights: torch.Tensor) -> "MobileNetV2":
         clone = copy.deepcopy(self)
@@ -177,6 +178,9 @@ class MobileNetV2(PrunableModel):
             new_bn.running_mean.data = bn.running_mean.data[keep].clone()
             new_bn.running_var.data = bn.running_var.data[keep].clone()
             new_bn.num_batches_tracked = bn.num_batches_tracked.clone()
+            # A fresh BatchNorm starts in TRAIN mode; assigning it into an
+            # eval-mode model leaves it normalizing by BATCH statistics.
+            new_bn.train(bn.training)
             return new_bn
 
         expand[0], expand[1] = new_e, slice_bn(bn_e)

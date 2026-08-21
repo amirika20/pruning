@@ -61,8 +61,8 @@ WHAT TO READ OFF IT.
   means the method is removing low-energy units, which is the cheap and correct
   thing to do, not a mistake in unit choice.
 
-Conv layers are supported for `response`/`cosine`/`delta_f` (the responses come
-straight off the hook), but not `cylinder`, whose codes live on im2col patches.
+All four work on Conv2d: responses come straight off the hook, and `cylinder`
+uses the BN-folded filter codes with the box measured over im2col patches.
 """
 
 from __future__ import annotations
@@ -109,7 +109,6 @@ def similarity_matrices(model: PrunableModel, layer_idx: int, x: torch.Tensor,
             np.fill_diagonal(C, 1.0)
             out["cosine"] = C
 
-    linear = isinstance(model.prunable_layer(layer_idx), nn.Linear)
     mass = None
     try:
         from src.pruning.methods.mash import extract_units
@@ -127,7 +126,7 @@ def similarity_matrices(model: PrunableModel, layer_idx: int, x: torch.Tensor,
         d2 = np.maximum(dg[:, None] + dg[None, :] - 2.0 * Ku, 0.0)
         out["delta_f"] = ward_weight(mass) * d2
 
-    if "cylinder" in kinds and mass is not None and linear:
+    if "cylinder" in kinds and mass is not None:
         from src.pruning.methods.mash import _layer_inputs
         Z = _layer_inputs(model, layer_idx, x)
         lo, hi = Z.min(axis=0), Z.max(axis=0)

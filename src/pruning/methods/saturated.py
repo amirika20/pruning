@@ -73,11 +73,12 @@ bias, and it comes out of the same solve rather than being applied afterwards.
 calibration moments; `empirical` uses sample averages; `bias_only` keeps the
 constant term and drops the linear projection; `none` deletes outright.
 
-SCOPE. Dead removal works on Linear and Conv2d (detection only needs the
-pre-activation, and there is nothing to repair). Always-on removal is Linear
-only, since re-solving the consumer's columns needs the activation Grams.
-`criterion='interval'` is Linear only for the same reason the box is: conv units
-live on im2col patches.
+SCOPE. All three criteria and both modes work on Linear and Conv2d; conv units
+are filters over im2col patches, so the region and the Grams are measured in
+patch space. The one restriction is repair='kernel' on conv, which would need a
+patch-space covariance of dimension C_in*kH*kW -- use repair='empirical' there.
+Nothing here rewrites a layer's own weights, so a paired BatchNorm is never
+disturbed.
 
 EXPECT NOTHING ON BATCHNORM NETWORKS. BatchNorm actively suppresses saturation
 -- it standardizes the pre-activation, so no channel sits entirely on one side
@@ -101,7 +102,8 @@ from src.pruning.registry import (
 # MASH owns the canonical unit extraction (BN folding, the unit-gain gauge) and
 # the rectified-Gaussian Grams; importing keeps one implementation of each.
 from src.pruning.methods.mash import (
-    TINY, UnitMoments, _layer_inputs, _relu_moments, extract_units)
+    TINY, UnitMoments, _layer_inputs, _relu_moments, consumer_has_bias,
+    extract_units)
 
 CRITERIA = ("interval", "margin", "empirical")
 REPAIRS = ("kernel", "empirical", "bias_only", "none")
@@ -167,7 +169,8 @@ class SaturatedPruning(PruningMethod):
       energy_tol   relative contribution energy below which a unit counts as
                    dead; catches weight-collapsed units (default 1e-10)
       repair       'kernel' | 'empirical' | 'bias_only' | 'none', for the
-                   always-on removals only                (default 'kernel')
+                   always-on removals only. None (default) resolves per layer:
+                   'kernel' on Linear, 'empirical' on conv
       n_calib      inputs used for the MOMENTS and the repair Grams; these
                    concentrate quickly (default 128)
       n_box        inputs used to measure the region for criterion='interval';
@@ -179,12 +182,13 @@ class SaturatedPruning(PruningMethod):
 
     def __init__(self, mode: str = "both", criterion: str = "margin",
                  kappa: float = 4.0, energy_tol: float = 1e-10,
-                 repair: str = "kernel", n_calib: int = 128,
-                 n_box: int | None = None, max_fraction: float = 0.9):
+                 repair: str | None = None, n_calib: int = 128,
+                 n_box: int | None = None, max_fraction: float = 0.9,
+                 max_rows: int = 20000):
         for name, val, allowed in (("mode", mode, MODES),
                                    ("criterion", criterion, CRITERIA),
                                    ("repair", repair, REPAIRS)):
-            if val not in allowed:
+            if val is not None and val not in allowed:
                 raise ValueError(f"{name} must be one of {allowed}, got {val!r}")
         if kappa < 0.0:
             raise ValueError(f"kappa must be >= 0, got {kappa}")
@@ -198,6 +202,7 @@ class SaturatedPruning(PruningMethod):
         self.n_calib = int(n_calib)
         self.n_box = None if n_box is None else int(n_box)
         self.max_fraction = float(max_fraction)
+        self.max_rows = int(max_rows)
 
     # -- the two tests -----------------------------------------------------
 
@@ -214,15 +219,10 @@ class SaturatedPruning(PruningMethod):
         z = _preactivations(model, layer_idx, xz)
         H = z.shape[1]
 
-        units = extract_units(model, layer_idx)[0] if is_linear else None
+        units = extract_units(model, layer_idx)[0]
 
         W = b = box = None
         if self.criterion == "interval":
-            if not is_linear:
-                raise NotImplementedError(
-                    "criterion='interval' needs the layer-input box, and conv "
-                    "units live on im2col patches; use criterion='margin' on "
-                    "conv layers (it reads the pre-activation directly)")
             W = units.alpha[:, None] * units.u          # w_eff (BN folded)
             b = -units.alpha * units.rho                # b_eff
             # The region is measured from as many inputs as available, NOT from
@@ -240,8 +240,7 @@ class SaturatedPruning(PruningMethod):
         # already carries alpha_i. Without an outgoing column (conv), rank by the
         # response energy alone.
         resp2 = (np.maximum(z, 0.0) ** 2).mean(axis=0)
-        energy = (np.linalg.norm(units.C, axis=1) ** 2 * resp2 if is_linear
-                  else resp2)
+        energy = np.linalg.norm(units.C, axis=1) ** 2 * resp2
         total = float(energy.sum())
         collapsed = energy <= self.energy_tol * max(total, TINY)
         return dead | collapsed, always, {"energy": energy, "collapsed": collapsed,
@@ -264,7 +263,8 @@ class SaturatedPruning(PruningMethod):
         if len(removed) == 0:
             return None, None
 
-        Z = _layer_inputs(model, layer_idx, ctx.train_inputs[: self.n_calib])
+        Z = _layer_inputs(model, layer_idx, ctx.train_inputs[: self.n_calib],
+                          max_rows=self.max_rows)
         if self.repair == "empirical":
             Phi = np.maximum(Z @ units.u.T - units.rho[None, :], 0.0)
             N = len(Z)
@@ -281,24 +281,29 @@ class SaturatedPruning(PruningMethod):
             g1 = _relu_moments(mk.m, mk.s)
             b1 = _relu_moments(mr.m, mr.s)
 
-        # adjoin the constant function: [[G, g1], [g1^T, 1]]
+        # Adjoin the constant function: [[G, g1], [g1^T, 1]]. Only when the
+        # consumer can actually hold a constant -- otherwise solve the plain
+        # system, so the columns are optimal for the network we can build.
         K = len(keep)
-        A = np.empty((K + 1, K + 1))
+        use_const = consumer_has_bias(model, layer_idx)
+        n = K + 1 if use_const else K
+        A = np.empty((n, n))
         A[:K, :K] = G
-        A[:K, K] = g1
-        A[K, :K] = g1
-        A[K, K] = 1.0
-        rhs = np.empty((K + 1, len(removed)))
+        rhs = np.empty((n, len(removed)))
         rhs[:K] = B
-        rhs[K] = b1
-        lam = 1e-8 * max(np.trace(A) / (K + 1), TINY)
-        sol = np.linalg.solve(A + lam * np.eye(K + 1), rhs)      # [K+1, |R|]
+        if use_const:
+            A[:K, K] = g1
+            A[K, :K] = g1
+            A[K, K] = 1.0
+            rhs[K] = b1
+        lam = 1e-8 * max(np.trace(A) / n, TINY)
+        sol = np.linalg.solve(A + lam * np.eye(n), rhs)          # [n, |R|]
 
         X = sol[:K] @ V[removed]                        # [K, m] effective weights
-        const = sol[K] @ V[removed]                     # [m] leftover constant
+        const = sol[K] @ V[removed] if use_const else None
         if self.repair == "bias_only":
             X = np.zeros_like(X)
-            const = (b1 @ V[removed])
+            const = (b1 @ V[removed]) if use_const else None
         safe_alpha = np.where(units.alpha[keep] > TINY, units.alpha[keep], 1.0)
         C_new[keep] = units.C[keep] + X / safe_alpha[:, None]
         return C_new, const
@@ -316,11 +321,20 @@ class SaturatedPruning(PruningMethod):
 
         take_dead = self.mode in ("dead", "both")
         take_always = self.mode in ("always_on", "both")
-        if take_always and not isinstance(model.prunable_layer(layer_idx), nn.Linear):
+        layer = model.prunable_layer(layer_idx)
+        # None = resolve per layer: closed-form Grams on Linear, sample averages
+        # on conv, where the patch-space covariance is unaffordable anyway.
+        if self.repair is None:
+            self.repair = "empirical" if isinstance(layer, nn.Conv2d) else "kernel"
+        if (take_always and isinstance(layer, nn.Conv2d)
+                and self.repair in ("kernel", "projection")):
             raise NotImplementedError(
-                "always-on removal re-solves the consumer's columns, which needs "
-                "activation Grams; conv units live on im2col patches. Use "
-                "mode='dead' on conv layers -- dead removal needs no repair.")
+                "repair='kernel' evaluates its Grams in closed form under a "
+                "Gaussian over the layer's inputs, which on conv means a "
+                "patch-space covariance -- expensive and misspecified for "
+                "patches. Use repair='empirical' on conv layers (the same "
+                "normal equations from sample averages), or mode='dead', which "
+                "needs no repair at all.")
 
         rm_dead = np.flatnonzero(dead) if take_dead else np.zeros(0, dtype=int)
         rm_always = np.flatnonzero(always & ~dead) if take_always else np.zeros(0, dtype=int)
@@ -367,7 +381,12 @@ class SaturatedPruning(PruningMethod):
             C_new, const = self._repair_columns(model, layer_idx, ctx, keep,
                                                 rm_always)
             if C_new is not None:
-                dec.new_outgoing = torch.from_numpy(C_new)
+                ow = model.outgoing_weights(layer_idx)
+                if ow.shape[0] != C_new.shape[0]:
+                    # conv consumer: outgoing_weights is [H*kk, fan_out] while
+                    # the columns are carried as [H, kk*fan_out]
+                    C_new = C_new.reshape(ow.shape[0], ow.shape[1])
+                dec.new_outgoing = torch.from_numpy(np.ascontiguousarray(C_new))
             if const is not None:
                 dec.bias_delta = torch.from_numpy(const)
         return dec
@@ -512,6 +531,33 @@ def _selftest() -> None:  # pragma: no cover
         else:
             raise AssertionError(f"expected ValueError for {bad}")
 
+    # 7. Conv + BatchNorm: a planted dead FILTER must be found and its removal
+    # must be free, with the surviving BN slots left in eval mode.
+    from src.models.cnn import CNN
+
+    torch.manual_seed(0)
+    cnet = CNN(hidden_sizes=[8, 10], input_channels=1, output_dim=3).eval()
+    Xc = torch.randn(6, 1, 12, 12)
+    with torch.no_grad():                     # plant a certainly-dead filter
+        cnet.blocks[0].bn.bias[3] = -50.0
+        cref = cnet(Xc).double()
+
+    class _CB:
+        train_ds = TensorDataset(Xc, torch.zeros(len(Xc), dtype=torch.long))
+
+    for crit in ("empirical", "margin", "interval"):
+        class _MC:
+            kind = "saturated"
+        _MC.params = {"mode": "dead", "criterion": crit, "energy_tol": 0.0}
+        out, rep = prune_model(cnet, PruningConfig(methods=[_MC()]), _CB(),
+                               torch.device("cpu"))
+        removed = rep[0]["removed_indices"]
+        assert 3 in removed, f"conv/{crit}: planted dead filter missed ({removed})"
+        with torch.no_grad():
+            ec = float((out(Xc).double() - cref).abs().max())
+        assert ec < 1e-5, f"conv/{crit}: dead removal must be ~free, got {ec:.2e}"
+        assert not out.prunable_bn(0).training, "pruned BN left in train mode"
+
     print("saturated.py self-tests passed:")
     print("  interval bounds sound and attained on the box corners")
     print("  planted dead / always-on units found by both criteria")
@@ -522,6 +568,8 @@ def _selftest() -> None:  # pragma: no cover
     print(f"  always-on repair beats deletion: none {errs['none']:.3e} -> "
           f"kernel {errs['kernel']:.3e}, empirical {errs['empirical']:.3e}")
     print("  parameter validation")
+    print(f"  conv+BN: planted dead FILTER found by all three criteria, removal "
+          f"free ({ec:.1e}), BN mode preserved")
 
 
 if __name__ == "__main__":

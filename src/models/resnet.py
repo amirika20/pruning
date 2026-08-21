@@ -178,7 +178,7 @@ class ResNet(PrunableModel):
         unfolded input patches, rows grouped by input channel (kH*kW rows per
         prunable channel, matching F.unfold's channel-major column order)."""
         conv = self.outgoing_module(idx)
-        return conv.weight.reshape(conv.out_channels, -1).t()
+        return conv.weight.detach().reshape(conv.out_channels, -1).t()
 
     def set_outgoing_weights(self, idx: int, new_weights: torch.Tensor) -> "ResNet":
         import copy as _copy
@@ -208,6 +208,11 @@ class ResNet(PrunableModel):
         new_conv.weight.data = conv.weight.data[keep].clone()
 
         new_bn = nn.BatchNorm2d(n_keep).to(device)
+        # A freshly constructed BatchNorm starts in TRAIN mode, and assigning
+        # it into an eval-mode model leaves that submodule normalizing by BATCH
+        # statistics -- so a pruned model silently computes something else, and
+        # a forward pass also overwrites the running stats we just copied.
+        new_bn.train(bn.training)
         new_bn.weight.data = bn.weight.data[keep].clone()
         new_bn.bias.data = bn.bias.data[keep].clone()
         new_bn.running_mean.data = bn.running_mean.data[keep].clone()

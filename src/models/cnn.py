@@ -68,7 +68,7 @@ class CNN(PrunableModel):
         a conv consumer, 1 for the head Linear) -- same layout as ResNet."""
         consumer = self.outgoing_module(idx)
         if isinstance(consumer, nn.Conv2d):
-            return consumer.weight.reshape(consumer.out_channels, -1).t()
+            return consumer.weight.detach().reshape(consumer.out_channels, -1).t()
         return consumer.weight.data.t()
 
     def set_outgoing_weights(self, idx: int, new_weights: torch.Tensor) -> "CNN":
@@ -99,6 +99,11 @@ class CNN(PrunableModel):
         new_conv.weight.data = conv.weight.data[keep].clone()
 
         new_bn = nn.BatchNorm2d(n_keep).to(device)
+        # A freshly constructed BatchNorm starts in TRAIN mode, and assigning
+        # it into an eval-mode model leaves that submodule normalizing by BATCH
+        # statistics -- so a pruned model silently computes something else, and
+        # a forward pass also overwrites the running stats we just copied.
+        new_bn.train(bn.training)
         new_bn.weight.data = bn.weight.data[keep].clone()
         new_bn.bias.data = bn.bias.data[keep].clone()
         new_bn.running_mean.data = bn.running_mean.data[keep].clone()

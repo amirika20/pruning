@@ -63,7 +63,7 @@ class ViT(PrunableModel):
         return self._mlp(idx)[3]
 
     def outgoing_weights(self, idx: int) -> torch.Tensor:
-        return self._mlp(idx)[3].weight.t()  # [mlp_dim, d_model]
+        return self._mlp(idx)[3].weight.detach().t()  # [mlp_dim, d_model]
 
     def prune_layer(self, idx: int, indices_to_remove: list[int]) -> "ViT":
         """Remove hidden neurons of encoder block `idx`'s MLP: mlp[0] loses

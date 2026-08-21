@@ -96,6 +96,9 @@ class ResCNN(PrunableModel):
         new_bn1.running_mean.data = bn1.running_mean.data[keep].clone()
         new_bn1.running_var.data = bn1.running_var.data[keep].clone()
         new_bn1.num_batches_tracked = bn1.num_batches_tracked.clone()
+        # A freshly constructed BatchNorm starts in TRAIN mode; assigning it into
+        # an eval-mode model leaves it normalizing by BATCH statistics.
+        new_bn1.train(bn1.training)
 
         new_conv2 = nn.Conv2d(n_keep, conv2.out_channels, conv2.kernel_size,
                               padding=conv2.padding, bias=False).to(device)

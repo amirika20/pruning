@@ -54,7 +54,7 @@ class OPT(PrunableModel):
         return self._layer(idx).fc2
 
     def outgoing_weights(self, idx: int) -> torch.Tensor:
-        return self._layer(idx).fc2.weight.t()  # [ffn_dim, d_model]
+        return self._layer(idx).fc2.weight.detach().t()  # [ffn_dim, d_model]
 
     def prune_layer(self, idx: int, indices_to_remove: list[int]) -> "OPT":
         """Remove FFN hidden neurons of decoder layer `idx`: fc1 loses output

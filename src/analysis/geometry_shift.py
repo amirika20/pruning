@@ -250,6 +250,35 @@ def geometry_shift(model_before: PrunableModel, model_after: PrunableModel,
             kept_inputs = np.array(sorted(set(range(d_full))
                                           - removed_by_layer[li - 1]), dtype=int)
 
+        # Conv: a patch coordinate belongs to one input CHANNEL, so a pruned
+        # producer removes whole blocks of kH*kW coordinates, not single ones.
+        if kept_inputs is not None and not linear:
+            lay = model_before.prunable_layer(li)
+            kk = int(np.prod(lay.kernel_size))
+            kept_inputs = np.concatenate(
+                [np.arange(c * kk, (c + 1) * kk) for c in kept_inputs]) \
+                if len(kept_inputs) else np.zeros(0, dtype=int)
+            d_full = d_full * kk
+
+        # Slot li-1 is the producer of slot li's input only in a plain
+        # sequential stack. In residual and inverted-bottleneck architectures
+        # consecutive slots are often in different blocks, with an unprunable
+        # block output between them, so the survivor list from li-1 has nothing
+        # to do with this layer's input. Verify the arithmetic before trusting
+        # it, and say so rather than lifting with the wrong index set.
+        d_before = model_before.prunable_layer(li).weight.reshape(
+            model_before.prunable_layer(li).weight.shape[0], -1).shape[1]
+        d_after = model_after.prunable_layer(li).weight.reshape(
+            model_after.prunable_layer(li).weight.shape[0], -1).shape[1]
+        lift_note = None
+        if d_after == d_before:
+            kept_inputs = d_full = None          # input untouched, no lift
+        elif kept_inputs is None or len(kept_inputs) != d_after \
+                or d_full != d_before:
+            lift_note = (f"input dim {d_before}->{d_after} and slot {li - 1} is "
+                         "not its producer, so the codes cannot be aligned")
+            kept_inputs = d_full = None
+
         base: dict[str, Any] = dict(meta)
         base.update(layer=li,
                     width_before=widths_before.get(li, np.nan),
@@ -268,12 +297,9 @@ def geometry_shift(model_before: PrunableModel, model_after: PrunableModel,
                     fn[f"resp_{k}_ratio"] = sa[k] / max(sb[k], TINY)
             fn["captured"] = captured_fraction(Pb, Pa)
 
-        if not linear:
-            rows.append({**base, "B": "-", **fn,
-                         "note": "conv: parameter-space codes live on im2col "
-                                 "patches, not lifted"})
+        if lift_note is not None:
+            rows.append({**base, "B": "-", **fn, "note": lift_note})
             continue
-
         ub, rb, mb, _ = layer_codes(model_before, li)
         ua, ra, ma, _ = layer_codes(model_after, li, kept_inputs, d_full)
         if ua.shape[1] != ub.shape[1]:

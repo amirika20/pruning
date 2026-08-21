@@ -9,6 +9,7 @@ record per-layer/per-method counts.
 
 from __future__ import annotations
 
+import copy
 import logging
 
 import torch
@@ -34,7 +35,11 @@ def prune_model(
     methods = [(m.kind, build_pruning_method(m.kind, **m.params)) for m in pruning.methods]
     train_inputs = bundle.train_ds.tensors[0].to(device)
 
-    current = model
+    # A deep copy up front: the new_incoming path writes rows into the prunable
+    # layer IN PLACE, so without this the caller's model is silently mutated on
+    # the first layer -- which corrupts every later comparison against it (and
+    # every other method run from the same checkpoint).
+    current = copy.deepcopy(model)
     report: list[dict] = []
 
     for layer_idx in range(model.n_prunable_layers()):
