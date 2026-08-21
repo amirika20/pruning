@@ -30,12 +30,15 @@ import torch
 
 from src.analysis.metrics import print_efficiency_report
 from src.analysis.plots import plot_aggregate_curves, plot_pruning_summary
+from src.analysis.pruning_detail import (
+    format_pruning_detail, layer_table, unit_table)
 from src.analysis.report import format_report
 from src.config import ExperimentConfig
 from src.data import build_dataset
 from src.experiments.aggregate import aggregate_seed_results
 from src.models import build_model
 from src.pruning import prune_model
+from src.reproducibility import run_fingerprint, seed_everything
 from src.training.trainer import evaluate, train
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -106,12 +109,19 @@ def run_single_seed(config: ExperimentConfig, seed: int, device: torch.device, d
     """One full train -> prune -> finetune pipeline. The same `seed` drives
     torch.manual_seed (model init + batching) and the dataset builder's
     data_seed. Returns (result_dict, models_dict, bundle)."""
-    torch.manual_seed(seed)
+    seed_everything(seed, deterministic=config.deterministic)
 
     bundle = build_dataset(config.data.kind, data_seed=seed, **config.data.params)
-    train_loader, val_loader = bundle.loaders(config.training.batch_size)
-    test_loader = bundle.test_loader()
+    # Re-seed before constructing the model so its initialization does NOT
+    # depend on how much global RNG the dataset builder consumed -- otherwise
+    # any change to the data pipeline silently shifts every initial weight.
+    seed_everything(seed, deterministic=config.deterministic)
     model = build_model(config.model.kind, bundle, **config.model.params).to(device)
+    model_init = copy.deepcopy(model)
+    # The train loader gets its own generator, so batch order is a function of
+    # the seed alone (see DatasetBundle.loaders).
+    train_loader, val_loader = bundle.loaders(config.training.batch_size, seed=seed)
+    test_loader = bundle.test_loader()
 
     def eval_stage(m) -> dict:
         """val (+ test when the dataset provides one) loss/accuracy of `m`.
@@ -147,6 +157,12 @@ def run_single_seed(config: ExperimentConfig, seed: int, device: torch.device, d
     model_before = copy.deepcopy(model)
     stage_trained = eval_stage(model_before)
 
+    # Everything a cross-method comparison needs to prove it is legitimate:
+    # two runs may be compared iff their `data` and `trained` digests agree.
+    fingerprints = run_fingerprint(bundle, model_init, model_before, seed, config)
+    logging.info("Fingerprints: " + "  ".join(
+        f"{k}={fingerprints[k]}" for k in ("data", "init", "trained") if k in fingerprints))
+
     # --- Prune ---
     logging.info("=== Pruning ===")
     model_pruned, pruning_per_layer = prune_model(model, config.pruning, bundle, device)
@@ -157,6 +173,7 @@ def run_single_seed(config: ExperimentConfig, seed: int, device: torch.device, d
         msg += f" | val accuracy: {pruned_val_acc:.4f}"
     logging.info(msg)
     metrics_pruned = print_efficiency_report(model_before, model_pruned, label="pruned")
+    logging.info("\n" + format_pruning_detail(pruning_per_layer, config.name))
 
     # --- Fine-tune (finetune.epochs == 0 skips the phase entirely, e.g. to
     # reproduce retraining-free protocols like Srinivas & Babu 2015) ---
@@ -222,6 +239,7 @@ def run_single_seed(config: ExperimentConfig, seed: int, device: torch.device, d
             "pruned": stage_pruned,
             "finetuned": stage_finetuned,
         },
+        "fingerprints": fingerprints,
         "pruning_per_layer": pruning_per_layer,
         "pruned": metrics_pruned,
         "finetuned": metrics_finetuned,
@@ -241,8 +259,8 @@ def run_experiment(config: ExperimentConfig) -> Path:
     save_json(collect_run_metadata(), exp_dir / "metadata.json")
 
     device = torch.device(config.training.device)
-    if device.type == "cuda":
-        torch.backends.cudnn.benchmark = True
+    if config.deterministic:
+        logging.info("Deterministic mode: cudnn autotuning off, RNGs pinned per seed")
 
     logging.info(f"{'=' * 60}")
     logging.info(f"Experiment: {config.name}  ({len(config.seeds)} seed(s), device={device})")
@@ -260,6 +278,18 @@ def run_experiment(config: ExperimentConfig) -> Path:
         s_dir = exp_dir / "seeds" / f"seed_{seed}"
         save_json(result, s_dir / "results.json")
         (s_dir / "report.txt").write_text(format_report(config, [result], title_suffix=f" (seed {seed})"))
+        # Tidy tables for ablation: one row per unit and one per layer, so a
+        # sweep can be analysed with a groupby instead of re-parsing JSON.
+        try:
+            rep = result["pruning_per_layer"]
+            unit_table(rep, seed=seed, name=config.name).to_csv(
+                s_dir / "units.csv", index=False)
+            layer_table(rep, seed=seed, name=config.name).to_csv(
+                s_dir / "layers.csv", index=False)
+            (s_dir / "pruning_detail.txt").write_text(
+                format_pruning_detail(rep, f"{config.name} seed {seed}"))
+        except Exception as exc:
+            logging.warning(f"could not write pruning tables: {exc}")
 
         plot_pruning_summary(
             models["before"], models["pruned"], models["finetuned"],

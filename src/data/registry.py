@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+import torch
 from torch.utils.data import DataLoader, TensorDataset
 
 DATASET_REGISTRY: dict[str, Callable[..., "DatasetBundle"]] = {}
@@ -47,10 +48,21 @@ class DatasetBundle:
         """Flat feature dimension -- meaningful for vector inputs (MLP-style)."""
         return self.input_shape[-1] if len(self.input_shape) == 1 else self.input_shape[0]
 
-    def loaders(self, batch_size: int | None = None) -> tuple[DataLoader, DataLoader]:
-        """Shuffled train loader + single-batch val loader (val order is irrelevant)."""
+    def loaders(self, batch_size: int | None = None, seed: int | None = None
+                ) -> tuple[DataLoader, DataLoader]:
+        """Shuffled train loader + single-batch val loader (val order is irrelevant).
+
+        Pass `seed` to give the train loader its own generator. Without it the
+        shuffle draws from the global torch RNG, so the batch order depends on
+        how much RNG earlier stages happened to consume -- fine for a single
+        run, but it makes two runs that should be identical drift apart."""
         bs = batch_size if batch_size is not None else len(self.train_ds)
-        train_loader = DataLoader(self.train_ds, batch_size=bs, shuffle=True)
+        gen = None
+        if seed is not None:
+            gen = torch.Generator()
+            gen.manual_seed(int(seed))
+        train_loader = DataLoader(self.train_ds, batch_size=bs, shuffle=True,
+                                  generator=gen)
         val_loader = DataLoader(self.val_ds, batch_size=len(self.val_ds), shuffle=False)
         return train_loader, val_loader
 

@@ -662,8 +662,53 @@ class _MashBase(PruningMethod):
         rad = R if self.radius == "sup" else R / np.sqrt(Z.shape[1] + 2.0)
         return units, ok, idx_map, frozen, sub, Z, mu, Sigma, x0, R, rad
 
+    @staticmethod
+    def _diagnostics(units, H, clusters, keep, recs, idx_map, cert=None):
+        """Per-unit bookkeeping: which cluster each unit landed in, whether it
+        survived as that cluster's representative or was absorbed, at which
+        greedy step and cost, and how much mass it carried."""
+        a = units.mass
+        cluster = np.full(H, -1)
+        role = np.array(["singleton"] * H, dtype=object)
+        step = np.full(H, -1)
+        cost = np.full(H, np.nan)
+        for cid, (mem, slot) in enumerate(zip(clusters, keep)):
+            for i in mem:
+                cluster[i] = cid
+                role[i] = "survivor" if i == slot else "absorbed"
+            if len(mem) == 1:
+                role[mem[0]] = "singleton"
+        # attribute each merge step to the unit it removed (in layer indices)
+        for t, r in enumerate(recs):
+            rm = int(idx_map[r["removed"]])
+            step[rm] = t
+            cost[rm] = r["cost"]
+        eta = np.full(H, np.nan)
+        for cid, mem in enumerate(clusters):
+            if len(mem) > 1:
+                m = np.array(mem)
+                g = (a[m, None] * units.u[m]).sum(axis=0)
+                A = float(a[m].sum())
+                eta[m] = float(np.linalg.norm(g)) / A if A > TINY else np.nan
+        out = {"cluster": cluster.tolist(), "role": role.tolist(),
+               "merge_step": step.tolist(), "merge_cost": cost.tolist(),
+               "mass": a.tolist(), "eta": eta.tolist()}
+        sizes = [len(m) for m in clusters]
+        out["_scalars"] = {
+            "n_clusters": len(clusters),
+            "n_multi_clusters": int(sum(1 for x in sizes if x > 1)),
+            "max_cluster_size": int(max(sizes)) if sizes else 0,
+            "mass_total": float(a.sum()),
+            "mass_absorbed": float(a[[i for i, r in enumerate(role)
+                                      if r == "absorbed"]].sum()),
+            "cum_cost": float(np.nansum([r["cost"] for r in recs])),
+        }
+        if cert is not None:
+            out["_scalars"]["certificate"] = float(cert)
+        return out
+
     def _emit(self, model, layer_idx, units, ok, idx_map, frozen, clusters_sub,
-              Z, mu, Sigma) -> PruneDecision:
+              Z, mu, Sigma, recs=None, cert=None) -> PruneDecision:
         clusters = [[int(idx_map[i]) for i in cl] for cl in clusters_sub] \
             + [[int(f)] for f in frozen]
         rows, biases, cols, keep, delta = realize(
@@ -687,7 +732,9 @@ class _MashBase(PruningMethod):
         dec = PruneDecision(
             remove=sorted(remove),
             new_incoming=(torch.from_numpy(W_new), torch.from_numpy(b_new)),
-            new_outgoing=torch.from_numpy(C_new))
+            new_outgoing=torch.from_numpy(C_new),
+            diagnostics=self._diagnostics(units, H, clusters, keep, recs or [],
+                                          idx_map, cert))
         if delta is not None:
             dec.bias_delta = torch.from_numpy(delta)
         return dec
@@ -731,7 +778,8 @@ class MASH(_MashBase):
         pairs = [(r["survivor"], r["removed"]) for r in recs]
         clusters = partition_at(H, pairs, len(pairs))
         return self._emit(model, layer_idx, units, ok, idx_map, frozen,
-                          clusters, Z, mu, Sigma)
+                          clusters, Z, mu, Sigma, recs=recs,
+                          cert=eng.certificate())
 
 
 @register_pruning_method("mash_certified")
@@ -795,7 +843,8 @@ class MASHCertified(_MashBase):
         pairs = [(r["survivor"], r["removed"]) for r in recs[:T]]
         clusters = partition_at(H, pairs, len(pairs))
         return self._emit(model, layer_idx, units, ok, idx_map, frozen,
-                          clusters, Z, mu, Sigma)
+                          clusters, Z, mu, Sigma, recs=recs,
+                          cert=eng.certificate())
 
 
 # ── self-tests ───────────────────────────────────────────────────────────────

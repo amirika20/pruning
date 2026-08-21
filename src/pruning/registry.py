@@ -44,6 +44,13 @@ class PruneDecision:
     merges via PrunableModel.add_outgoing_bias) is added to the consumer's
     bias -- for folding-based methods (e.g. LEO++) that absorb a removed
     neuron's constant contribution into the next layer.
+    `diagnostics` (optional) is free-form per-unit bookkeeping for analysis --
+    it never affects surgery. Convention: every key maps to a sequence of
+    length H (the layer's PRE-prune width), one entry per original unit, except
+    the reserved key "_scalars" whose value is a dict of layer-level numbers.
+    This is what lets an ablation say which units were removed, which were
+    absorbed into which survivor, and at what cost -- see
+    src.analysis.pruning_detail.
     `new_incoming` (optional, (weight, bias) for the PRUNABLE layer itself,
     applied BEFORE removal) rewrites surviving units' own hyperplanes -- for
     methods (e.g. HOPE) whose merge synthesizes a new parent unit that no
@@ -57,6 +64,7 @@ class PruneDecision:
     new_outgoing: "torch.Tensor | None" = None
     bias_delta: "torch.Tensor | None" = None
     new_incoming: "tuple[torch.Tensor, torch.Tensor] | None" = None
+    diagnostics: "dict[str, Any] | None" = None
 
 
 @dataclass

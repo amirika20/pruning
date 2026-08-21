@@ -41,6 +41,9 @@ def prune_model(
         n_before = layer_width(current, layer_idx)
         to_remove: set[int] = set()
         per_method: dict[str, int] = {}
+        removed_by: dict[str, list[int]] = {}
+        merge_ops: dict[str, list[dict]] = {}
+        diagnostics: dict[str, dict] = {}
 
         for kind, method in methods:
             ctx = PruneContext(
@@ -94,6 +97,15 @@ def prune_model(
             else:
                 selected = [i for i in decision if i not in to_remove]
             per_method[kind] = len(selected)
+            removed_by[kind] = sorted(int(i) for i in selected)
+            if isinstance(decision, PruneDecision):
+                if decision.merges:
+                    merge_ops[kind] = [
+                        {"removed": int(op.removed), "survivor": int(op.survivor),
+                         "scale": float(op.scale)} for op in ops
+                    ]
+                if decision.diagnostics:
+                    diagnostics[kind] = decision.diagnostics
             to_remove.update(selected)
 
         report.append({
@@ -102,6 +114,12 @@ def prune_model(
             "removed_per_method": per_method,
             "total_removed": len(to_remove),
             "neurons_after": n_before - len(to_remove),
+            # Analysis payload: WHICH units went, per method, plus whatever
+            # per-unit bookkeeping the method chose to expose.
+            "removed_indices": sorted(int(i) for i in to_remove),
+            "removed_indices_per_method": removed_by,
+            "merge_ops": merge_ops,
+            "diagnostics": diagnostics,
         })
         method_str = "  ".join(f"{k}={n}" for k, n in per_method.items())
         logging.info(

@@ -335,9 +335,33 @@ class SaturatedPruning(PruningMethod):
 
         remove = np.concatenate([rm_dead, rm_always]).astype(int)
         if len(remove) == 0 or len(remove) >= H:
-            return PruneDecision(remove=sorted(int(i) for i in remove[:H - 1]))
+            return PruneDecision(
+                remove=sorted(int(i) for i in remove[:H - 1]),
+                diagnostics={"role": (["kept"] * H),
+                             "act_freq": diag["act_freq"].tolist(),
+                             "energy": diag["energy"].tolist(),
+                             "_scalars": {"n_dead": 0, "n_always_on": 0,
+                                          "criterion": self.criterion}})
 
-        dec = PruneDecision(remove=sorted(int(i) for i in remove))
+        role = np.array(["kept"] * H, dtype=object)
+        role[rm_dead] = "dead"
+        role[rm_always] = "always_on"
+        diag = {
+            "role": role.tolist(),
+            "act_freq": diag["act_freq"].tolist(),
+            "energy": diag["energy"].tolist(),
+            "collapsed": diag["collapsed"].tolist(),
+            "_scalars": {
+                "n_dead": int(len(rm_dead)),
+                "n_always_on": int(len(rm_always)),
+                "n_collapsed": int(diag["collapsed"].sum()),
+                "criterion": self.criterion,
+                "kappa": self.kappa,
+                "repair": self.repair,
+            },
+        }
+        dec = PruneDecision(remove=sorted(int(i) for i in remove),
+                            diagnostics=diag)
         if len(rm_always) and self.repair != "none":
             keep = np.setdiff1d(np.arange(H), remove)
             C_new, const = self._repair_columns(model, layer_idx, ctx, keep,

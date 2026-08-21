@@ -94,6 +94,13 @@ class ExperimentConfig:
     # data_seed. Results across all seeds are averaged (see
     # src.experiments.aggregate).
     seeds: list[int] = field(default_factory=lambda: [0])
+    # Pin every RNG and disable cudnn autotuning, so the data split and the
+    # trained weights are reproducible from the seed alone. Required for any
+    # comparison of WHICH neurons different pruning methods remove -- the run's
+    # recorded fingerprints are what prove two runs started from the same
+    # place (see src.reproducibility). Turn off only to trade reproducibility
+    # for throughput.
+    deterministic: bool = True
     output_root: str = "outputs"
     notes: str = ""
 
