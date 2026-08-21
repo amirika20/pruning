@@ -269,7 +269,7 @@ class MashEngine:
     def __init__(self, units: Units, score: str = "delta_f",
                  x0: np.ndarray | None = None, radius: float | None = None,
                  mu: np.ndarray | None = None, Sigma: np.ndarray | None = None,
-                 gauge_correct: bool = True, measure: str = "gaussian",
+                 gauge_correct: bool = True, row_cache: bool = True, measure: str = "gaussian",
                  Z: np.ndarray | None = None):
         if score not in SCORES:
             raise ValueError(f"score must be one of {SCORES}, got {score!r}")
@@ -330,6 +330,21 @@ class MashEngine:
         if score == "exact_damage" and measure == "empirical":
             self._W = self.w @ self.w.T
         self._cost = self._all_costs()
+        # Row-minimum cache. Scanning the whole H x H matrix for the global
+        # argmin at every step makes a pass O(H^3), which is what put the wide
+        # transformer FFNs out of reach (37s at H=4096, ~77min at H=20480).
+        # Caching each row's minimum makes the global argmin O(K), and a merge
+        # only invalidates the rows whose minimum pointed at the merged pair --
+        # so a pass becomes O(H^2) in practice.
+        #
+        # np.argmin returns the FIRST minimum in row-major order, so taking the
+        # smallest row index achieving the smallest row-minimum, then that row's
+        # smallest column index, reproduces the flat argmin EXACTLY -- ties
+        # included. That matters: a different tie-break is a different method,
+        # not a faster one.
+        self._row_cache = bool(row_cache)
+        self._row_arg = np.argmin(self._cost, axis=1)
+        self._row_min = self._cost[np.arange(self.n_orig), self._row_arg]
 
     # -- codes -------------------------------------------------------------
 
@@ -484,9 +499,17 @@ class MashEngine:
 
     # -- one merge ---------------------------------------------------------
 
+    def _argmin(self) -> tuple[int, int]:
+        """The cheapest active pair, identical to np.argmin over the matrix."""
+        if not self._row_cache:
+            i, j = np.unravel_index(np.argmin(self._cost), self._cost.shape)
+            return int(i), int(j)
+        i = int(np.argmin(self._row_min))
+        return i, int(self._row_arg[i])
+
     def step(self) -> dict:
-        k, l = np.unravel_index(np.argmin(self._cost), self._cost.shape)
-        k, l = int(min(k, l)), int(max(k, l))
+        i0, j0 = self._argmin()
+        k, l = int(min(i0, j0)), int(max(i0, j0))
         cost = float(self._cost[k, l])
         self.cum_cost += cost
         # Lance--Williams needs the PRE-merge masses and cost rows
@@ -541,6 +564,30 @@ class MashEngine:
         self._cost[:, k] = np.inf
         self._cost[k, others] = new
         self._cost[others, k] = new
+
+        if self._row_cache:
+            # `l` is gone; `k` changed wholesale, so rescan its row once.
+            self._row_min[l] = np.inf
+            self._row_arg[l] = l
+            self._row_arg[k] = int(np.argmin(self._cost[k]))
+            self._row_min[k] = self._cost[k, self._row_arg[k]]
+            # For every other active row, the entry to `l` vanished and the
+            # entry to `k` changed. A row whose cached minimum pointed at
+            # either has lost its reference and must be rescanned; every other
+            # row still holds a valid minimum and only needs to be compared
+            # against its new cost to `k`. Read old_arg BEFORE writing.
+            old_arg = self._row_arg[others]
+            stale = (old_arg == k) | (old_arg == l)
+            cheap = others[~stale]
+            if len(cheap):
+                nc = self._cost[cheap, k]
+                better = nc < self._row_min[cheap]
+                self._row_min[cheap[better]] = nc[better]
+                self._row_arg[cheap[better]] = k
+            for i in others[stale]:
+                a = int(np.argmin(self._cost[i]))
+                self._row_arg[i] = a
+                self._row_min[i] = self._cost[i, a]
 
         self.cert_terms[k] = self._cert_term(k)
         nrm = float(np.linalg.norm(self.g[k]))
@@ -1352,6 +1399,21 @@ def _selftest() -> None:  # pragma: no cover
             worst = max(worst, float(rel.max()))
     assert worst < 1e-9, f"Lance-Williams disagrees with direct Ward, {worst:.2e}"
 
+    # 9c. The row-minimum cache must reproduce the brute-force argmin's merge
+    # sequence EXACTLY, ties included -- a different tie-break would be a
+    # different method rather than a faster one. Duplicates and a dead unit are
+    # planted above, so the degenerate cases are in scope.
+    for score_ in SCORES:
+        kw_ = dict(score=score_, x0=x0, radius=R, mu=mu, Sigma=Sigma)
+        fast_ = MashEngine(units, row_cache=True, **kw_)
+        slow_ = MashEngine(units, row_cache=False, **kw_)
+        seq_f = [(r["survivor"], r["removed"], r["cost"]) for r in fast_.dendrogram()]
+        seq_s = [(r["survivor"], r["removed"], r["cost"]) for r in slow_.dendrogram()]
+        assert [x[:2] for x in seq_f] == [x[:2] for x in seq_s], \
+            f"{score_}: row-cache merge sequence differs from brute force"
+        assert max(abs(a[2] - b_[2]) for a, b_ in zip(seq_f, seq_s)) == 0.0, \
+            f"{score_}: row-cache costs differ from brute force"
+
     # 10. Conv + BatchNorm end to end. The merged dictionary is refused here on
     # purpose (a folded hyperplane cannot be written back through the BN), the
     # medoid dictionary must work, and zero removals must be bit-exact.
@@ -1417,6 +1479,7 @@ def _selftest() -> None:  # pragma: no cover
     print("  repair ordering global <= projection <= sum (and empirical <= sum)")
     print("  registry round-trip for mash / mash_certified + param validation")
     print(f"  Lance-Williams update == direct Ward increment ({worst:.1e})")
+    print("  row-minimum cache == brute-force argmin, all 3 scores (exact)")
     print("  conv+BN: patch extraction, medoid path, bit-exact zero removal,")
     print("    BN mode preserved, merge-under-BN refused with a pointer")
 

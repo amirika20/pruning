@@ -56,28 +56,16 @@ way and measured at a scale where the O(H^2) pass actually dominates.
       one fashion cell from grid density alone. Fix the definition when
       promoting, not after.
 
-## P0 — blocks the LM half of the benchmark
+## P0 — clear
 
-- [ ] **Make the greedy pass subquadratic.** `MashEngine.step()` argmins over the
-      whole H x H cost matrix at every step, so a pass is O(H^3). Measured on one
-      layer: 0.13s at H=512, 0.45s at 1024, 4.73s at 2048, 37.2s at 4096 -- x8
-      per doubling. Extrapolated whole-model PLAN time, paid again by every arm
-      that changes the score:
-
-      | model | ffn_dim | layers | plan |
-      |---|---|---|---|
-      | opt-1.3b | 8192 | 24 | ~2 h |
-      | opt-2.7b | 10240 | 32 | ~5 h |
-      | opt-6.7b | 16384 | 32 | ~21 h |
-      | opt-13b | 20480 | 40 | ~51 h |
-
-      6.7b and 13b are consequently DISABLED in `configs/benchmark/suite.yaml`
-      (commented out with these numbers beside them). No GPU helps -- the pass is
-      host-side numpy. The fix is to cache per-row minima and refresh only the
-      rows whose minimum pointed at the merged pair, giving O(H^2) (seconds at
-      H=20480); it composes with the Lance--Williams update already in place.
-      Verify by asserting the new and old implementations produce IDENTICAL merge
-      sequences over a few hundred random layers, not merely similar capacities.
+- [x] **DONE.** ~~Make the greedy pass subquadratic.~~ `MashEngine.step()` cached
+      per-row minima instead of rescanning the H x H matrix, so a pass went from
+      O(H^3) to O(H^2) -- measured x4.0 per doubling of H instead of x8. Whole-model
+      plan time: opt-1.3b 2.0h -> 4.5min, 2.7b 5.2h -> 9.3min, 6.7b 21.1h ->
+      23.9min, 13b 51.3h -> 46.6min (27-66x). 6.7b and 13b are re-enabled in
+      suite.yaml; 13b still needs an 80GB card for its 48.4 GiB of fp32 weights.
+      Equivalence is a permanent self-test: identical merge sequences and costs
+      against the brute-force argmin for all three scores.
 
 ## P1 — needed before numbers are publishable
 

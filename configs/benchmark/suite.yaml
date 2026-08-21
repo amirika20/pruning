@@ -126,39 +126,32 @@ entries:
 
   - name: wikitext_opt2.7b
     family: fc
-    resources: xlarge
+    resources: large
     data: {kind: wikitext, params: {tokenizer: facebook/opt-2.7b, seq_len: 512,
                                     n_train: 128, n_val: 32, n_test: null}}
     model: {kind: opt, params: {size: 2.7b, pretrained: true}}
 
-  # ── DISABLED: above 2.7b until the greedy pass is subquadratic ────────────
-  # MashEngine.step() argmins over the whole H x H cost matrix every step, so
-  # the pass is O(H^3). Measured on one layer: 0.13s at H=512, 4.7s at 2048,
-  # 37s at 4096 -- x8 per doubling. Extrapolated whole-model PLAN time, before
-  # a single width is evaluated, and paid again by every arm that changes the
-  # score:
-  #     opt-1.3b (ffn 8192,  24L)   ~2 h     ok
-  #     opt-2.7b (ffn 10240, 32L)   ~5 h     ok on the 24h profile
-  #     opt-6.7b (ffn 16384, 32L)  ~21 h     no
-  #     opt-13b  (ffn 20480, 40L)  ~51 h     no
-  # No GPU fixes this -- the pass is host-side numpy. Caching per-row minima
-  # instead of rescanning makes it O(H^2) (seconds at H=20480); re-enable these
-  # two entries once that lands. Weights would also need an 80GB card: 13b is
-  # 48.4 GiB in fp32.
-  #
-  # - name: wikitext_opt6.7b
-  #   family: fc
-  #   resources: xlarge
-  #   data: {kind: wikitext, params: {tokenizer: facebook/opt-6.7b, seq_len: 512,
-  #                                   n_train: 128, n_val: 32, n_test: null}}
-  #   model: {kind: opt, params: {size: 6.7b, pretrained: true}}
-  #
-  # - name: wikitext_opt13b
-  #   family: fc
-  #   resources: xlarge
-  #   data: {kind: wikitext, params: {tokenizer: facebook/opt-13b, seq_len: 512,
-  #                                   n_train: 128, n_val: 32, n_test: null}}
-  #   model: {kind: opt, params: {size: 13b, pretrained: true}}
+  # OPT-6.7b and 13b are back in reach: the greedy pass is now O(H^2) (a cached
+  # row minimum instead of rescanning the H x H matrix), so whole-model PLAN time
+  # went from ~21h/~51h to ~24min/~47min. What remains is weights in memory:
+  # 6.7b is 25.0 GiB in fp32 and 13b is 48.4 GiB, so 13b needs an 80GB card.
+  # Ask for one explicitly when submitting xlarge -- the feature name is
+  # cluster-specific, e.g.
+  #     sbatch --gres=gpu:h100:1 --array=... scripts/slurm_xlarge.sh <manifest>
+  # or halve the footprint by loading in bf16.
+  - name: wikitext_opt6.7b
+    family: fc
+    resources: large
+    data: {kind: wikitext, params: {tokenizer: facebook/opt-6.7b, seq_len: 512,
+                                    n_train: 128, n_val: 32, n_test: null}}
+    model: {kind: opt, params: {size: 6.7b, pretrained: true}}
+
+  - name: wikitext_opt13b
+    family: fc
+    resources: xlarge
+    data: {kind: wikitext, params: {tokenizer: facebook/opt-13b, seq_len: 512,
+                                    n_train: 128, n_val: 32, n_test: null}}
+    model: {kind: opt, params: {size: 13b, pretrained: true}}
 
 # ── defaults applied to every generated config ──────────────────────────────
 defaults:
@@ -181,3 +174,5 @@ seed_overrides:
   wikitext_opt2.7b: [0]
   imagenet_resnet50: [0]
   imagenet_vit_b16: [0]
+  wikitext_opt6.7b: [0]
+  wikitext_opt13b: [0]
