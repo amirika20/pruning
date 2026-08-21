@@ -15,6 +15,7 @@ touched -- this only fetches model weights, so it is safe to run repeatedly.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -24,6 +25,16 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 SUITE = ROOT / "configs" / "benchmark" / "suite.yaml"
+
+# Same cache roots the job scripts export, so a login-node warm is what the
+# compute nodes then find. Set PRUNING_SCRATCH to relocate.
+SCRATCH = os.environ.setdefault(
+    "PRUNING_SCRATCH", "/n/netscratch/pehlevan_lab/Lab/akazeminia/pruning")
+os.environ.setdefault("TORCH_HOME", f"{SCRATCH}/cache/torch")
+os.environ.setdefault("HF_HOME", f"{SCRATCH}/cache/huggingface")
+os.environ.setdefault("HF_DATASETS_CACHE", f"{SCRATCH}/cache/huggingface/datasets")
+for _d in ("TORCH_HOME", "HF_HOME"):
+    Path(os.environ[_d]).mkdir(parents=True, exist_ok=True)
 
 
 def main() -> None:
@@ -38,6 +49,8 @@ def main() -> None:
     if args.entries:
         todo = [e for e in todo if e["name"] in set(args.entries)]
 
+    print(f"caches: TORCH_HOME={os.environ['TORCH_HOME']}")
+    print(f"        HF_HOME={os.environ['HF_HOME']}")
     print(f"{len(todo)} pretrained entr(ies) to warm\n")
     ok = bad = 0
     for e in todo:

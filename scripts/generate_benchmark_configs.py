@@ -124,6 +124,8 @@ def main() -> None:
                     help="keep only these suite entries (by name)")
     ap.add_argument("--resources", nargs="*", default=None,
                     help="keep only these resource classes")
+    ap.add_argument("--output-root", default=None,
+                    help="where results go (default: suite.yaml's, i.e. lab scratch)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--clean", action="store_true",
                     help="delete generated/ before writing")
@@ -132,6 +134,8 @@ def main() -> None:
     suite = yaml.safe_load((BENCH / "suite.yaml").read_text())
     arms = expand_arms(yaml.safe_load((BENCH / "arms.yaml").read_text()))
     defaults = suite.get("defaults") or {}
+    if args.output_root:
+        defaults["output_root"] = args.output_root
     overrides = suite.get("seed_overrides") or {}
 
     entries = suite["entries"]

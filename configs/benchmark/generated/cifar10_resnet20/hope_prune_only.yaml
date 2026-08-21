@@ -26,6 +26,6 @@ seeds:
 - 0
 - 1
 - 2
-output_root: outputs/benchmark
+output_root: /n/netscratch/pehlevan_lab/Lab/akazeminia/pruning/results
 analyze_geometry: true
 deterministic: true

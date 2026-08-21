@@ -150,7 +150,10 @@ defaults:
   training_pretrained: {epochs: 0}
   analyze_geometry: true
   deterministic: true
-  output_root: outputs/benchmark
+  # Lab scratch: home is quota'd and 13b OPT weights alone are ~52GB.
+  # The job scripts also point TORCH_HOME/HF_HOME under here, so weights
+  # and results share one tree. Override with --output-root.
+  output_root: /n/netscratch/pehlevan_lab/Lab/akazeminia/pruning/results
 
 # Seeds vary the calibration draw and the evaluation split, not the weights, for
 # pretrained entries -- so one seed is enough where a download fixes the model
