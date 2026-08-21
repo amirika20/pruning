@@ -21,6 +21,61 @@ from src.pruning.geometry import layer_width
 from src.pruning.registry import PruneContext, PruneDecision, build_pruning_method
 
 
+def apply_decision(
+    model: PrunableModel,
+    layer_idx: int,
+    decision: "list[int] | PruneDecision",
+    already_removed: "set[int] | frozenset[int]" = frozenset(),
+) -> "tuple[PrunableModel, list[int]]":
+    """Apply one selection's surgery to `layer_idx` and return (model, selected).
+
+    Neurons are NOT removed here -- that is a single prune_layer call once every
+    method has had its say. What happens here is the weight surgery a method asks
+    for, and the ORDER matters:
+
+      merges        first, on the still-full-width layer, so later methods score
+                    the merged weights
+      new_incoming  the method synthesized hyperplanes for surviving units, so
+                    rewrite the layer's own rows/bias (in place, on this model)
+      bias_delta    after merges, since the deltas come from the removed units'
+                    own outgoing columns, which merges never touch
+      new_outgoing  last: a re-solved consumer matrix supersedes any transfer
+
+    Factored out of prune_model because the width-sweep harness has to apply
+    decisions without re-running selection, and a second copy of this ordering
+    is how subtle surgery bugs get in.
+    """
+    selected: list[int]
+    if not isinstance(decision, PruneDecision):
+        return model, [i for i in decision if i not in already_removed]
+
+    selected = [i for i in decision.remove if i not in already_removed]
+    selected_set = set(selected)
+    # Ops touching neurons another method already claimed are dropped: their
+    # transfer target or source is gone.
+    ops = [op for op in decision.merges
+           if op.removed in selected_set and op.survivor not in already_removed]
+    if len(ops) < len(decision.merges):
+        logging.warning(
+            f"  Layer {layer_idx}: dropped {len(decision.merges) - len(ops)} "
+            "merge op(s) that overlapped a previous method's selection")
+    if ops:
+        model = model.merge_outgoing(layer_idx, ops)
+    if decision.new_incoming is not None:
+        w_new, b_new = decision.new_incoming
+        lin = model.prunable_layer(layer_idx)
+        lin.weight.data.copy_(
+            w_new.to(lin.weight.dtype).to(lin.weight.device).view_as(lin.weight))
+        if lin.bias is not None:
+            lin.bias.data.copy_(
+                b_new.to(lin.bias.dtype).to(lin.bias.device).view_as(lin.bias))
+    if decision.bias_delta is not None:
+        model = model.add_outgoing_bias(layer_idx, decision.bias_delta)
+    if decision.new_outgoing is not None:
+        model = model.set_outgoing_weights(layer_idx, decision.new_outgoing)
+    return model, selected
+
+
 def prune_model(
     model: PrunableModel,
     pruning: PruningConfig,
@@ -58,49 +113,8 @@ def prune_model(
                 already_selected=set(to_remove),
             )
             decision = method.select(current, layer_idx, ctx)
-            if isinstance(decision, PruneDecision):
-                selected = [i for i in decision.remove if i not in to_remove]
-                selected_set = set(selected)
-                # Merge surgery happens immediately (on the still-full-width
-                # layer), so later methods score the merged weights; the
-                # actual removal is deferred to the single prune_layer call
-                # below. Ops touching neurons another method already claimed
-                # are dropped -- their transfer target/source is gone.
-                ops = [
-                    op for op in decision.merges
-                    if op.removed in selected_set and op.survivor not in to_remove
-                ]
-                if len(ops) < len(decision.merges):
-                    logging.warning(
-                        f"  Layer {layer_idx}: dropped {len(decision.merges) - len(ops)} merge op(s) "
-                        "that overlapped a previous method's selection"
-                    )
-                if ops:
-                    current = current.merge_outgoing(layer_idx, ops)
-                # Parent-neuron surgery (e.g. HOPE): the method synthesized new
-                # hyperplanes for surviving units, so rewrite the prunable
-                # layer's own rows/bias before removal. Removed rows are
-                # dropped by prune_layer below, so their values don't matter.
-                if decision.new_incoming is not None:
-                    w_new, b_new = decision.new_incoming
-                    lin = current.prunable_layer(layer_idx)
-                    lin.weight.data.copy_(
-                        w_new.to(lin.weight.dtype).to(lin.weight.device).view_as(lin.weight))
-                    if lin.bias is not None:
-                        lin.bias.data.copy_(
-                            b_new.to(lin.bias.dtype).to(lin.bias.device).view_as(lin.bias))
-                # Constant absorption (e.g. LEO++): fold the removed neurons'
-                # constant contribution into the consumer's bias. Applied
-                # after merges -- deltas are computed from the removed
-                # neurons' own outgoing columns, which merges never touch.
-                if decision.bias_delta is not None:
-                    current = current.add_outgoing_bias(layer_idx, decision.bias_delta)
-                # Reconstruction surgery (e.g. OSSCAR): replace the consumer's
-                # weights with the method's re-solved matrix before removal.
-                if decision.new_outgoing is not None:
-                    current = current.set_outgoing_weights(layer_idx, decision.new_outgoing)
-            else:
-                selected = [i for i in decision if i not in to_remove]
+            current, selected = apply_decision(current, layer_idx, decision,
+                                               already_removed=to_remove)
             per_method[kind] = len(selected)
             removed_by[kind] = sorted(int(i) for i in selected)
             if isinstance(decision, PruneDecision):

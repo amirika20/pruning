@@ -785,6 +785,39 @@ def _layer_inputs(model: PrunableModel, layer_idx: int, x: torch.Tensor,
     return out
 
 
+@dataclass
+class MashPlan:
+    """One full greedy pass over a layer, cut-able at any width.
+
+    Holds ONLY what is width-independent AND model-state-independent: the merge
+    sequence over the layer's own output units, plus the per-step records. It
+    deliberately does NOT cache weights, moments or responses.
+
+    That distinction is the point. Pruning an EARLIER layer removes columns from
+    this layer's weight matrix, so this layer's orientations, masses and input
+    moments all change -- but its output units, and hence a partition defined
+    over them, do not. So the expensive part (the O(H^2) greedy pass and its
+    kernel evaluations) is cached, while the realization is recomputed in the
+    current model's coordinates at every width. That is the recorded finding
+    that intact-model dendrograms suffice and need not be rebuilt on the
+    progressively pruned model.
+    """
+
+    layer_idx: int
+    pairs: list[tuple[int, int]]
+    recs: list[dict]
+    idx_map: np.ndarray
+    n_mergeable: int
+
+    @property
+    def max_merges(self) -> int:
+        return len(self.pairs)
+
+    def merges_for(self, fraction: float) -> int:
+        """Merge count for a target fraction of this layer's units."""
+        return min(int(round(fraction * (self.n_mergeable - 1))), self.max_merges)
+
+
 class _MashBase(PruningMethod):
     """Shared plumbing: build the engine, cut it, realize, emit a decision."""
 
@@ -999,6 +1032,49 @@ class _MashBase(PruningMethod):
         return dec
 
 
+    # -- the anytime interface -------------------------------------------
+
+    def plan(self, model: PrunableModel, layer_idx: int,
+             ctx: PruneContext) -> MashPlan:
+        """Run the greedy pass ONCE, all the way down. Cutting it afterwards is
+        free, which is what lets a single pass serve every target width."""
+        (units, ok, idx_map, frozen, sub, Z, mu, Sigma,
+         x0, R, rad, measure) = self._prepare(model, layer_idx, ctx)
+        eng = MashEngine(sub, score=self.score, x0=x0, radius=rad, mu=mu,
+                         Sigma=Sigma, gauge_correct=self.gauge_correct,
+                         measure=measure, Z=Z)
+        recs = eng.dendrogram()
+        return MashPlan(layer_idx=layer_idx,
+                        pairs=[(r["survivor"], r["removed"]) for r in recs],
+                        recs=recs, idx_map=idx_map, n_mergeable=len(idx_map))
+
+    def emit_at(self, model: PrunableModel, layer_idx: int, plan: MashPlan,
+                n_merges: int, ctx: PruneContext) -> PruneDecision:
+        """Realize a cut of `plan` in the CURRENT model's coordinates.
+
+        The partition comes from the cached pass; units, moments and repair are
+        recomputed here, because an earlier layer's pruning has changed this
+        layer's input space even though its output units are untouched.
+        """
+        (units, ok, idx_map, frozen, sub, Z, mu, Sigma,
+         x0, R, rad, measure) = self._prepare(model, layer_idx, ctx)
+        if len(idx_map) != plan.n_mergeable or not np.array_equal(idx_map, plan.idx_map):
+            # A unit's norm collapsed to zero since planning, so the index
+            # mapping no longer lines up. Re-plan rather than mis-apply it.
+            logging.warning(
+                f"  layer {layer_idx}: mergeable set changed since planning "
+                "(a unit lost its hyperplane); rebuilding the pass")
+            plan = self.plan(model, layer_idx, ctx)
+        k = max(0, min(int(n_merges), plan.max_merges))
+        if k <= 0:
+            return PruneDecision(remove=[])
+        clusters = partition_at(plan.n_mergeable, plan.pairs, k)
+        recs = plan.recs[:k]
+        return self._emit(model, layer_idx, units, ok, idx_map, frozen,
+                          clusters, Z, mu, Sigma, recs=recs,
+                          cert=recs[-1].get("certificate") if recs else None)
+
+
 @register_pruning_method("mash")
 class MASH(_MashBase):
     """Width-driven MASH: merge until `n_remove` units are gone.
@@ -1023,23 +1099,10 @@ class MASH(_MashBase):
 
     def select(self, model: PrunableModel, layer_idx: int,
                ctx: PruneContext) -> PruneDecision:
-        (units, ok, idx_map, frozen, sub, Z, mu, Sigma,
-         x0, R, rad, measure) = self._prepare(model, layer_idx, ctx)
-        H = len(idx_map)
+        plan = self.plan(model, layer_idx, ctx)
         want = (self.n_remove if self.fraction is None
-                else int(round(self.fraction * (H - 1))))
-        budget = min(want, max(H - 1, 0))
-        if budget <= 0:
-            return PruneDecision(remove=[])
-        eng = MashEngine(sub, score=self.score, x0=x0, radius=rad, mu=mu,
-                         Sigma=Sigma, gauge_correct=self.gauge_correct,
-                         measure=measure, Z=Z)
-        recs = eng.dendrogram(max_steps=budget)
-        pairs = [(r["survivor"], r["removed"]) for r in recs]
-        clusters = partition_at(H, pairs, len(pairs))
-        return self._emit(model, layer_idx, units, ok, idx_map, frozen,
-                          clusters, Z, mu, Sigma, recs=recs,
-                          cert=eng.certificate())
+                else plan.merges_for(self.fraction))
+        return self.emit_at(model, layer_idx, plan, want, ctx)
 
 
 @register_pruning_method("mash_certified")

@@ -4,16 +4,24 @@ Written 2026-08-21. Companion to `studies/DESIGN_SPACE.md` (option registry +
 evidence ledger E1–E17) and `studies/CLUSTER_HANDOFF.md`. Evidence tags below
 refer to that ledger; read it before re-deciding anything it already settled.
 
-**Status in one line:** the algorithms and the analysis tooling are in place, but
-everything promoted to `src/` is `nn.Linear`-only, so a sweep run today would be
-an MLP-only sweep — which is exactly the regime where E15 says the methods tie.
-The two real blockers are conv support and a width-sweep harness.
+**Status in one line:** P0 is clear — every method runs on Conv/BN, the sweep
+harness produces accuracy-versus-width curves with first-crossing capacity, and
+the baselines exist. What remains is protocol decisions (P2), the paper work
+(P3), and housekeeping (P4) before the real run.
+
+**One early measurement worth knowing before writing the cost paragraph:** on a
+small MLP the sweep's `plan_seconds` (0.15–0.19s) is much smaller than its
+`solve_seconds` (1.2–2.2s), because the repair and realization are per-width no
+matter what — only the greedy pass amortizes. MASH's whole-sweep total came out
+ABOVE OSSCAR's there (2.41s vs 0.41s). The anytime advantage is real but it
+amortizes the dendrogram, not the repair, so the claim needs to be stated that
+way and measured at a scale where the O(H^2) pass actually dominates.
 
 ---
 
 ## P0 — blocks a *meaningful* benchmark
 
-- [ ] **Conv/BN support for MASH.** `mash._prepare` raises `NotImplementedError`
+- [x] **DONE (8cb0dc6).** ~~Conv/BN support for MASH.~~ `mash._prepare` raises `NotImplementedError`
       on `Conv2d`, and `data_free_merge` is FC-only, `saturated`'s always-on path
       is Linear-only, HOPE's merge disables itself under BN. So on the paper's
       suite (ResNet-20/56, VGG-16-BN, MobileNetV2, ResNet-50) the only arms that
@@ -30,7 +38,7 @@ The two real blockers are conv support and a width-sweep harness.
       original filters and BN slots) and E12/E13 say it is the better arm on
       BN-trained filters anyway. Merged filters on conv can stay unsupported.
 
-- [ ] **Width-sweep harness with dendrogram reuse.** Capacity at −δ needs an
+- [x] **DONE (this commit).** ~~Width-sweep harness with dendrogram reuse.~~ Capacity at −δ needs an
       accuracy-vs-width curve, and the runner does one prune per invocation.
       Worse, `MASH.select()` rebuilds the dendrogram on every call, so sweeping
       12 widths through the runner would rebuild it 12 times — paying 12× the
@@ -41,7 +49,7 @@ The two real blockers are conv support and a width-sweep harness.
       curve. `studies/gram_stability/phase_b.py` and `phase_c2.py` have the
       shape of this (`dendrogram` + `partition_at` + `apply_cuts_*`).
 
-- [ ] **First-crossing capacity metric in `src/`.** There is no capacity metric
+- [x] **DONE (this commit).** ~~First-crossing capacity metric in `src/`.~~ There is no capacity metric
       in the promoted path at all, and the studies version has a known bug:
       `capacity()` takes the MAX passing width rather than the first crossing, so
       a denser grid reads systematically higher — E15 measured 0.772 vs 0.484 on
@@ -50,7 +58,7 @@ The two real blockers are conv support and a width-sweep harness.
 
 ## P1 — needed before numbers are publishable
 
-- [ ] **Random and magnitude baselines.** Table 2 has both columns; neither is
+- [x] **DONE (d163063).** ~~Random and magnitude baselines.~~ Table 2 has both columns; neither is
       registered. (`silent`/`redundant` were removed and were never these.)
 - [ ] **Trained-checkpoint cache.** Determinism makes retraining correct, not
       cheap; for M methods × N widths × S seeds training dominates. Key it on

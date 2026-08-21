@@ -103,3 +103,104 @@ def print_efficiency_report(before: nn.Module, after: nn.Module, label: str = "p
     logging.info(f"  FLOPs      : {m['flops_before']:>8,}  →  {m['flops_after']:>8,}   ({m['flops_reduction_pct']:.1f}% reduction)")
     logging.info(f"  Infer time : {m['inference_time_before_us']:>8.2f} µs  →  {m['inference_time_after_us']:>8.2f} µs   ({m['inference_speedup_pct']:.1f}% faster)")
     return m
+
+
+# ── capacity: reading a width sweep ──────────────────────────────────────────
+#
+# "Capacity at -delta" is the largest fraction of prunable units removable while
+# validation accuracy stays within delta of the dense model. Read off a noisy
+# accuracy-versus-sparsity curve, that sentence admits two answers, and they are
+# not interchangeable.
+
+def capacity_at(fractions, accs, acc0: float, drop: float,
+                mode: str = "first_crossing", sustain: int = 1) -> float:
+    """Largest removable fraction meeting an accuracy tolerance.
+
+    mode='first_crossing' (default) is the largest tested fraction such that the
+    curve had not yet fallen through the tolerance -- the honest reading, since
+    claiming a fraction is removable implies the model works there AND at every
+    less aggressive width.
+
+    mode='max_passing' is the largest fraction that happens to pass anywhere on
+    the grid. It is a MAXIMUM OVER NOISY SAMPLES, so its expected value grows
+    with the number of grid points: every extra width evaluated is another
+    chance at a lucky pass near the tolerance. That makes it depend on grid
+    density rather than on the method -- the recorded studies saw 0.772 against
+    0.484 for one identical configuration measured on a 25-point and a 12-point
+    grid. It is kept only so that bias can be shown rather than asserted; do not
+    report it as capacity.
+
+    `sustain` tolerates isolated dips: the curve must fail on `sustain`
+    consecutive grid points to count as having crossed. Capacity never exceeds
+    the largest fraction that itself passed, so a single failure at the end of
+    the grid cannot be read as a pass.
+    """
+    if mode not in ("first_crossing", "max_passing"):
+        raise ValueError("mode must be 'first_crossing' or 'max_passing'")
+    if sustain < 1:
+        raise ValueError(f"sustain must be >= 1, got {sustain}")
+    order = sorted(range(len(fractions)), key=lambda i: fractions[i])
+    f = [float(fractions[i]) for i in order]
+    passing = [float(accs[i]) >= acc0 - drop for i in order]
+    if not f:
+        return 0.0
+    if mode == "max_passing":
+        hits = [fi for fi, ok in zip(f, passing) if ok]
+        return max(hits) if hits else 0.0
+    best, run = 0.0, 0
+    for fi, ok in zip(f, passing):
+        if ok:
+            run, best = 0, fi
+        else:
+            run += 1
+            if run >= sustain:
+                break
+    return best
+
+
+def grid_spacing(fractions) -> float:
+    """Largest gap between consecutive tested widths -- the resolution any
+    capacity number is quoted at, and the number two tables must share before
+    their capacities can be compared."""
+    f = sorted(float(x) for x in fractions)
+    return max((b - a for a, b in zip(f, f[1:])), default=0.0)
+
+
+def curve_auc(fractions, accs) -> float:
+    """Mean accuracy over the swept range (trapezoidal, normalized by the range).
+
+    Tolerance-free, so it does not inherit the grid-density problem at all, and
+    it uses the whole curve rather than one crossing. Worth reporting beside
+    capacity: two methods with equal capacity can have very different curves.
+    """
+    order = sorted(range(len(fractions)), key=lambda i: fractions[i])
+    f = [float(fractions[i]) for i in order]
+    a = [float(accs[i]) for i in order]
+    if len(f) < 2:
+        return a[0] if a else float("nan")
+    span = f[-1] - f[0]
+    if span <= 0:
+        return float(sum(a) / len(a))
+    area = sum((f[i + 1] - f[i]) * (a[i + 1] + a[i]) / 2.0 for i in range(len(f) - 1))
+    return area / span
+
+
+def curve_report(fractions, accs, acc0: float,
+                 drops=(0.005, 0.01, 0.02), sustain: int = 1) -> dict:
+    """Every capacity reading of one curve, both modes, plus AUC and spacing.
+
+    The `*_max_passing` entries are diagnostics: a large gap against the
+    first-crossing value means the curve oscillates through the tolerance, so
+    the grid is too coarse or the validation set too small to support a
+    capacity claim at that tolerance.
+    """
+    out = {"acc0": float(acc0), "n_grid": len(fractions),
+           "grid_spacing": grid_spacing(fractions),
+           "auc": curve_auc(fractions, accs)}
+    for d in drops:
+        tag = f"{d:g}".replace("0.", "")
+        out[f"cap{tag}"] = capacity_at(fractions, accs, acc0, d,
+                                       "first_crossing", sustain)
+        out[f"cap{tag}_max_passing"] = capacity_at(fractions, accs, acc0, d,
+                                                   "max_passing")
+    return out
