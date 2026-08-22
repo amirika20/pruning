@@ -15,6 +15,7 @@ model:
   params:
     size: 6.7b
     pretrained: true
+    dtype: float16
 training:
   epochs: 0
 pruning:

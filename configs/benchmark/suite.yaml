@@ -165,14 +165,22 @@ entries:
     resources: large
     data: {kind: wikitext, params: {tokenizer: facebook/opt-6.7b, seq_len: 512,
                                     n_train: 128, n_val: 32, n_test: null}}
-    model: {kind: opt, params: {size: 6.7b, pretrained: true}}
+    # fp16 is the dtype the checkpoint was released in, so this is a
+    # faithful load rather than a compromise -- and it halves 25.0 GiB
+    # of resident weights. Merged-unit arms carry fp16 rounding in the
+    # synthesized hyperplane; deletion-only arms do not.
+    model: {kind: opt, params: {size: 6.7b, pretrained: true, dtype: float16}}
 
   - name: wikitext_opt13b
     family: fc
     resources: xlarge
     data: {kind: wikitext, params: {tokenizer: facebook/opt-13b, seq_len: 512,
                                     n_train: 128, n_val: 32, n_test: null}}
-    model: {kind: opt, params: {size: 13b, pretrained: true}}
+    # fp16 is the dtype the checkpoint was released in, so this is a
+    # faithful load rather than a compromise -- and it halves 48.4 GiB
+    # of resident weights. Merged-unit arms carry fp16 rounding in the
+    # synthesized hyperplane; deletion-only arms do not.
+    model: {kind: opt, params: {size: 13b, pretrained: true, dtype: float16}}
 
 # ── defaults applied to every generated config ──────────────────────────────
 defaults:

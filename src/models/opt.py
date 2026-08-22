@@ -113,8 +113,13 @@ class OPT(PrunableModel):
         return pruned
 
 
+_DTYPES = {"float32": torch.float32, "float16": torch.float16,
+           "bfloat16": torch.bfloat16}
+
+
 @register_model("opt")
-def build_opt(bundle: DatasetBundle, size: str = "125m", pretrained: bool = True) -> OPT:
+def build_opt(bundle: DatasetBundle, size: str = "125m", pretrained: bool = True,
+              dtype: str = "float32") -> OPT:
     """OPT, pretrained only (see OPT_SIZES); weights cache under
     ~/.cache/huggingface on first use."""
     if not pretrained:
@@ -126,7 +131,22 @@ def build_opt(bundle: DatasetBundle, size: str = "125m", pretrained: bool = True
         raise ValueError(f"opt size must be one of {sorted(OPT_SIZES)}, got {size!r}")
     from transformers import OPTForCausalLM
 
-    net = OPTForCausalLM.from_pretrained(OPT_SIZES[size], dtype=torch.float32)
+    if dtype not in _DTYPES:
+        raise ValueError(f"dtype must be one of {sorted(_DTYPES)}, got {dtype!r}")
+    # The released OPT checkpoints are fp16, so float32 is an upcast that doubles
+    # resident memory for no extra information -- 13b is 48.4 GiB in fp32 against
+    # 24.2 in fp16. float32 stays the default because it is what the rest of this
+    # repo uses and the small sizes cost nothing; the big ones set dtype
+    # explicitly (see configs/benchmark/suite.yaml).
+    #
+    # CAVEAT for merge-based pruning at reduced precision: extract_units upcasts
+    # to float64 so the pruning arithmetic is unaffected, but the realized
+    # weights are cast back to the layer dtype, so a synthesized hyperplane is
+    # quantized to fp16's 10-bit mantissa. Deletion-only arms (saturated,
+    # magnitude, random, medoid dictionaries) are unaffected; merged units carry
+    # that rounding, and the dense baseline shifts too, so the dtype belongs in
+    # the reported protocol rather than being silently varied across rows.
+    net = OPTForCausalLM.from_pretrained(OPT_SIZES[size], dtype=_DTYPES[dtype])
     # OPT's embedding matrix is padded past the tokenizer's true vocab
     # (50265 tokens vs 50272 rows for 125m), so ids must merely fit.
     if bundle.output_dim > net.config.vocab_size:
