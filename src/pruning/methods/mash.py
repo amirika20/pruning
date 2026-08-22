@@ -343,8 +343,13 @@ class MashEngine:
         # included. That matters: a different tie-break is a different method,
         # not a faster one.
         self._row_cache = bool(row_cache)
-        self._row_arg = np.argmin(self._cost, axis=1)
-        self._row_min = self._cost[np.arange(self.n_orig), self._row_arg]
+        if self.n_orig:
+            self._row_arg = np.argmin(self._cost, axis=1)
+            self._row_min = self._cost[np.arange(self.n_orig), self._row_arg]
+        else:
+            # An empty layer is reachable, not defensive: see plan().
+            self._row_arg = np.zeros(0, dtype=int)
+            self._row_min = np.zeros(0)
 
     # -- codes -------------------------------------------------------------
 
@@ -919,7 +924,8 @@ class MashPlan:
 
     def merges_for(self, fraction: float) -> int:
         """Merge count for a target fraction of this layer's units."""
-        return min(int(round(fraction * (self.n_mergeable - 1))), self.max_merges)
+        return max(0, min(int(round(fraction * (self.n_mergeable - 1))),
+                          self.max_merges))
 
 
 class _MashBase(PruningMethod):
@@ -1159,6 +1165,20 @@ class _MashBase(PruningMethod):
         free, which is what lets a single pass serve every target width."""
         (units, ok, idx_map, frozen, sub, Z, mu, Sigma,
          x0, R, rad, measure) = self._prepare(model, layer_idx, ctx)
+        if len(idx_map) < 2:
+            # Fewer than two mergeable units, so there is no pair to score. This
+            # is REACHABLE, not defensive: a unit's alpha = ||w_row|| is taken
+            # over the layer's INPUT space, and pruning an earlier layer deletes
+            # columns from this one -- so a row whose weight lived in the deleted
+            # columns collapses to zero norm and stops being a hyperplane. At an
+            # aggressive fraction every row of a narrow layer can go that way.
+            # Building an engine on it used to reach np.argmin of an empty
+            # matrix and take the whole cell down.
+            logging.info(
+                f"  layer {layer_idx}: {len(idx_map)} mergeable unit(s) "
+                "(earlier pruning collapsed the rest); nothing to plan")
+            return MashPlan(layer_idx=layer_idx, pairs=[], recs=[],
+                            idx_map=idx_map, n_mergeable=len(idx_map))
         eng = MashEngine(sub, score=self.score, x0=x0, radius=rad, mu=mu,
                          Sigma=Sigma, gauge_correct=self.gauge_correct,
                          measure=measure, Z=Z)
@@ -1442,6 +1462,19 @@ def _selftest() -> None:  # pragma: no cover
         assert max(abs(a[2] - b_[2]) for a, b_ in zip(seq_f, seq_s)) == 0.0, \
             f"{score_}: row-cache costs differ from brute force"
 
+    # 9d. A layer can legitimately end up with NO mergeable units: alpha is
+    # taken over the layer's input space, so pruning an earlier layer can
+    # collapse a row's norm to zero and it stops being a hyperplane. Building an
+    # engine on that used to reach np.argmin of an empty matrix; it killed a real
+    # benchmark cell (mnist_lenet, cylinder + l2 radius + empirical repair, at
+    # an aggressive width) rather than emitting an empty decision.
+    for H_ in (0, 1):
+        empty = Units(np.zeros((H_, 4)), np.zeros(H_), np.zeros(H_),
+                      np.zeros((H_, 3)))
+        e_ = MashEngine(empty, score="cylinder", x0=np.zeros(4), radius=1.0)
+        assert e_.dendrogram() == [], f"H={H_} should yield no merges"
+        assert e_.certificate() == 0.0
+
     # 10. Conv + BatchNorm end to end. The merged dictionary is refused here on
     # purpose (a folded hyperplane cannot be written back through the BN), the
     # medoid dictionary must work, and zero removals must be bit-exact.
@@ -1508,6 +1541,7 @@ def _selftest() -> None:  # pragma: no cover
     print("  registry round-trip for mash / mash_certified + param validation")
     print(f"  Lance-Williams update == direct Ward increment ({worst:.1e})")
     print("  row-minimum cache == brute-force argmin, all 3 scores (exact)")
+    print("  a layer with 0 or 1 mergeable units plans and emits empty, not raises")
     print("  conv+BN: patch extraction, medoid path, bit-exact zero removal,")
     print("    BN mode preserved, merge-under-BN refused with a pointer")
 
