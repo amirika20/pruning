@@ -49,9 +49,13 @@ WHAT TO READ OFF IT.
   means tight clumps, near 1 means a diffuse cloud with no natural groups.
 
   Removed-pair similarity. Given a pruning report, the similarity between each
-  removed unit and its survivor, against the null of all pairs. A method that
-  is genuinely exploiting redundancy removes pairs from the right tail; one that
-  is not shows a removed-pair distribution indistinguishable from the null.
+  removed unit and its survivor, against a PERMUTATION null -- random removal
+  sets of the same size scored by the same statistic. A method genuinely
+  exploiting redundancy lifts above 1; one that is not sits at 1. The null has to
+  be drawn the same way as the observation, which was got wrong here at first:
+  comparing a maximum-over-survivors against a median-over-all-pairs made a
+  random selection score ~2.1, so every number below that was worse than chance
+  while looking like a lift.
 
   Cosine is blind to MAGNITUDE, and that matters here. Two barely-active units
   are interchangeable -- their post-ReLU distance is tiny -- while their cosine
@@ -245,33 +249,102 @@ def criterion_agreement(D_a: np.ndarray, D_b: np.ndarray,
             "cheap_chance": k / a.size}
 
 
-def removed_pair_similarity(C: np.ndarray, removed: Sequence[int],
-                            survivors: dict[int, int] | None = None,
-                            norms: np.ndarray | None = None
-                            ) -> dict[str, float]:
-    """Similarity of removed units to their survivor, against the all-pairs null.
+def _removed_stat(C: np.ndarray, removed: np.ndarray, kept: np.ndarray,
+                  paired: dict[int, int] | None,
+                  rng: np.random.Generator | None = None) -> float:
+    """Median similarity of each removed unit to the survivor it is scored against.
 
-    Without an explicit removed->survivor map, each removed unit is scored
-    against its most similar SURVIVING unit, which is the right null-free
-    reading for methods that delete rather than merge.
+    `paired` given  -> the named survivor (a merge), or a RANDOM survivor when
+                       `rng` is set, which is the matched null for that case.
+    `paired` None    -> the most similar surviving unit, for both the observation
+                       and the null.
+
+    The MODE MUST BE THE SAME on both sides. Deciding it per unit was the second
+    incarnation of this bug: a deletion arm has an empty survivor map, so the
+    observation fell through to max-over-survivors while the null still drew a
+    single random survivor, and a random removal set scored 1.9-2.4 instead of 1.
     """
-    H = C.shape[0]
-    removed = [int(i) for i in removed]
-    if not removed or len(removed) >= H:
-        return {}
-    kept = np.array(sorted(set(range(H)) - set(removed)), dtype=int)
-    vals: list[float] = []
+    vals = []
     for i in removed:
-        if survivors and i in survivors:
-            vals.append(abs(float(C[i, survivors[i]])))
+        i = int(i)
+        if paired is not None:
+            j = int(rng.choice(kept)) if rng is not None else paired[i]
+            vals.append(abs(float(C[i, j])))
         else:
             vals.append(float(np.abs(C[i, kept]).max()))
-    null = np.abs(_offdiag(C))
-    v = np.array(vals)
-    out = {"removed_sim_median": float(np.median(v)),
-           "removed_sim_p10": float(np.quantile(v, 0.1)),
-           "null_sim_median": float(np.median(null)),
-           "lift": float(np.median(v) / max(np.median(null), TINY))}
+    return float(np.median(vals)) if vals else float("nan")
+
+
+def removed_pair_similarity(C: np.ndarray, removed: Sequence[int],
+                            survivors: dict[int, int] | None = None,
+                            norms: np.ndarray | None = None,
+                            n_null: int = 64, seed: int = 0
+                            ) -> dict[str, float]:
+    """Similarity of removed units to their survivor, against a PERMUTATION null.
+
+    The null is random removal sets of the same size, scored by the SAME
+    statistic -- which is the whole point of a null and was got wrong at first
+    here. The observed statistic is a maximum over survivors (or a specific
+    named pair); the original null was the median over all pairs. Those are
+    different quantities, so a purely random removal set already scored ~2.1 and
+    every real number had to be read against an invisible, much-larger-than-one
+    baseline. Anything below ~2 looked like a lift and was in fact worse than
+    chance.
+
+    With the null drawn the same way, `lift` is ~1.0 for a random selection by
+    construction, and above 1 genuinely means "removed units more alike to their
+    survivors than chance".
+
+    IT IS A ONE-SIDED DETECTOR, and worth knowing before reading it as a score.
+    The statistic is a maximum over survivors, so it SATURATES: on a layer whose
+    clumps are larger than the removal count, both the observation and the null
+    find a near-identical survivor and both sit at 1. Measured on a synthetic
+    four-clump layer removing 12 of 48 --
+
+        random                    lift 1.000
+        half of every clump       lift 1.000   <- the ideal selection, and
+                                                  indistinguishable from random
+        one entire clump removed  lift 0.079
+        two entire clumps         lift 0.075
+
+    -- so lift well below 1 means the method stranded units with no similar
+    survivor, while lift ~1 means only "not worse than chance". Do not read ~1
+    as evidence of exploiting redundancy.
+
+    Cosine is also blind to MAGNITUDE, so read `removed_norm_ratio` alongside: a
+    method harvesting barely-active units shows a lift below 1 because two
+    near-zero responses cannot correlate, and that is correct behaviour rather
+    than a failure -- the low norm ratio is what distinguishes the two cases.
+    """
+    H = C.shape[0]
+    removed = np.array(sorted({int(i) for i in removed}), dtype=int)
+    if not len(removed) or len(removed) >= H:
+        return {}
+    kept = np.array(sorted(set(range(H)) - set(removed.tolist())), dtype=int)
+
+    # One decision, used on both sides: pair only when every removed unit has a
+    # named survivor. A partial map would mix the two statistics again.
+    paired = (survivors if survivors and all(int(i) in survivors for i in removed)
+              else None)
+    observed = _removed_stat(C, removed, kept, paired)
+    rng = np.random.default_rng(seed)
+    nulls = []
+    for _ in range(n_null):
+        r = rng.choice(H, size=len(removed), replace=False)
+        k = np.array(sorted(set(range(H)) - set(r.tolist())), dtype=int)
+        # For the paired case the null keeps the pairing but randomizes the
+        # partner; for the unpaired case it is the same max-over-survivors on a
+        # random removal set.
+        nulls.append(_removed_stat(C, r, k,
+                                   {int(i): 0 for i in r} if paired else None,
+                                   rng=rng if paired else None))
+    null = float(np.median(nulls))
+
+    out = {"paired": bool(paired),
+           "removed_sim_median": observed,
+           "null_sim_median": null,
+           "null_sim_p90": float(np.quantile(nulls, 0.9)),
+           "lift": observed / max(null, TINY)}
     if norms is not None and len(norms) == H:
         allm = max(float(np.median(norms)), TINY)
         out["removed_norm_ratio"] = float(np.median(norms[removed]) / allm)
@@ -373,3 +446,71 @@ def format_similarity(df: pd.DataFrame) -> str:
                            f"{r.removed_sim_median:.3f} vs null "
                            f"{r.null_sim_median:.3f}  lift {r.lift:.2f}{extra}")
     return "\n".join(out) + "\n"
+
+
+# ── self-tests ───────────────────────────────────────────────────────────────
+
+def _selftest() -> None:  # pragma: no cover
+    rng = np.random.default_rng(0)
+
+    # A synthetic layer with four tight clumps: within-clump cosine ~1,
+    # across-clump ~0, so the expected answers are known.
+    H = 48
+    base = rng.normal(size=(H, 6)) * 0.15
+    for k in range(4):
+        base[k * 12:(k + 1) * 12] += 6 * np.eye(6)[k]
+    u = base / np.linalg.norm(base, axis=1, keepdims=True)
+    C = np.clip(u @ u.T, -1.0, 1.0)
+    np.fill_diagonal(C, 1.0)
+
+    # 1. structural invariants of a cosine matrix
+    assert np.allclose(C, C.T) and np.allclose(np.diag(C), 1.0)
+
+    # 2. THE NULL MUST BE DRAWN THE SAME WAY AS THE OBSERVATION. Getting this
+    # wrong twice is why it is pinned here: comparing a maximum-over-survivors
+    # against a median-over-all-pairs put a random selection at ~2.1, and
+    # deciding the mode per unit left deletion arms mismatched at ~1.9-2.4.
+    lifts = [removed_pair_similarity(
+        C, rng.choice(H, 12, replace=False).tolist())["lift"] for _ in range(40)]
+    assert 0.9 < float(np.median(lifts)) < 1.1, \
+        f"unpaired null mis-specified: random removal lifts to {np.median(lifts):.2f}"
+
+    paired = {i: i - 6 for i in range(6, 12)}          # same-clump partners
+    r = removed_pair_similarity(C, list(paired), paired)
+    assert r["paired"] and r["lift"] > 5, f"paired lift should be large, got {r}"
+    cross = {i: i + 20 for i in range(6)}              # cross-clump partners
+    assert removed_pair_similarity(C, list(cross), cross)["lift"] < 0.6
+
+    # 3. it is a ONE-SIDED detector: stranding units is caught, an ideal
+    # selection is NOT distinguishable from chance (the statistic saturates).
+    whole = removed_pair_similarity(C, list(range(12)))["lift"]
+    ideal = removed_pair_similarity(
+        C, [i for k in range(4) for i in range(k * 12 + 6, k * 12 + 12)])["lift"]
+    assert whole < 0.2, f"a whole clump removed should read far below 1, got {whole}"
+    assert 0.9 < ideal < 1.1, f"saturation expected at ~1, got {ideal}"
+
+    # 4. spectra: known answers, and scale invariance
+    st = spectrum_stats(np.eye(8))
+    assert abs(st["participation_ratio"] - 8) < 1e-9
+    assert abs(st["pr_fraction"] - 1.0) < 1e-9
+    K = u @ u.T
+    assert abs(spectrum_stats(K)["participation_ratio"]
+               - spectrum_stats(9.7 * K)["participation_ratio"]) < 1e-6
+
+    # 5. a cost matrix agrees perfectly with itself
+    D = ward_weight(np.abs(rng.normal(size=H)) + 0.1) * (1.0 - C)
+    ag = criterion_agreement(D, D)
+    assert abs(ag["spearman"] - 1) < 1e-9 and abs(ag["cheap_overlap"] - 1) < 1e-9
+
+    print("similarity.py self-tests passed:")
+    print("  cosine matrix symmetric with unit diagonal")
+    print(f"  permutation null matched to the observation "
+          f"(random lift {np.median(lifts):.3f}, paired {r['lift']:.1f}, "
+          f"cross-clump {removed_pair_similarity(C, list(cross), cross)['lift']:.2f})")
+    print(f"  one-sided: whole clump {whole:.3f}, ideal selection {ideal:.3f} "
+          f"(saturates at 1)")
+    print("  PR(identity)=n, PR scale-invariant, self-agreement exact")
+
+
+if __name__ == "__main__":
+    _selftest()
