@@ -34,6 +34,7 @@ width and the count would clamp the narrow ones.
 
 from __future__ import annotations
 
+import copy
 import inspect
 import logging
 import time
@@ -150,7 +151,15 @@ def sweep_widths(
 
     for f in fractions:
         t0 = time.perf_counter()
-        current = model
+        # A DEEP COPY PER WIDTH, for the same reason prune_model takes one: the
+        # new_incoming path rewrites the prunable layer's rows IN PLACE, and on
+        # the first layer `current` would otherwise still be the caller's model.
+        # Without this, a merge-emitting method overwrites layer 0 of the dense
+        # weights on the first fraction and every later width silently starts
+        # from a contaminated model -- so the curve stops being a set of
+        # independent prunes of one trained network, which is the only thing
+        # that makes its points comparable.
+        current = copy.deepcopy(model)
         for li in range(model.n_prunable_layers()):
             n_units = current.prunable_layer(li).weight.shape[0]
             ctx = PruneContext(train_inputs=train_inputs, bundle=bundle,
@@ -330,12 +339,35 @@ def _selftest() -> None:  # pragma: no cover
     assert "cap01" in rep and rep["grid_spacing"] > 0
     assert rep["total_seconds"] >= rep["plan_seconds"] > 0
 
+    # 5. THE SWEEP MUST NOT TOUCH THE MODEL IT IS GIVEN, and its points must be
+    # independent of each other. apply_decision's new_incoming path rewrites the
+    # prunable layer's rows in place, so without a copy per width a
+    # merge-emitting method overwrites layer 0 of the dense weights on the first
+    # fraction and every later width starts from a contaminated model -- which
+    # was a live bug, and changed the measured accuracies.
+    from src.reproducibility import state_dict_digest
+    before = state_dict_digest(net)
+    fwd = sweep_widths(net, bundle, "mash",
+                       {"score": "delta_f", "repair": "kernel"},
+                       fractions=[0.2, 0.4, 0.6])
+    assert state_dict_digest(net) == before, \
+        "sweep_widths mutated the model it was given"
+    rev = sweep_widths(net, bundle, "mash",
+                       {"score": "delta_f", "repair": "kernel"},
+                       fractions=[0.6, 0.4, 0.2])
+    f_acc = fwd.set_index("fraction").val_acc.round(10).to_dict()
+    r_acc = rev.set_index("fraction").val_acc.round(10).to_dict()
+    assert f_acc == r_acc, \
+        f"curve depends on the order widths were swept: {f_acc} vs {r_acc}"
+
     print("sweep.py self-tests passed:")
     print("  a cut of a cached plan == a fresh select() at the same width")
     print("    (removal sets AND emitted weights, delta_f and cylinder)")
     print(f"  one plan per layer serves the whole grid ({calls['n']} plan calls)")
     print("  every registered method can be given a width by the sweep")
     print("  first-crossing 0.2 vs max-passing 0.5 on an oscillating curve")
+    print("  the swept model is left untouched, and the curve is independent")
+    print("    of the order the widths were visited")
 
 
 if __name__ == "__main__":
