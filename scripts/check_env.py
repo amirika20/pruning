@@ -66,10 +66,29 @@ def requirement_modules() -> list[str]:
     return out
 
 
+def read_manifest(m: str) -> list[Path]:
+    """Cells listed in a manifest, or a clean error naming what is missing.
+
+    Resolved against the repo root as well as the cwd: the job scripts cd to
+    SLURM_SUBMIT_DIR, but a manifest passed as a repo-relative path should work
+    from anywhere. A missing manifest is nearly always a cluster checkout that
+    has not been pulled -- say so, rather than raising FileNotFoundError from
+    inside pathlib, which is what a preflight exists to avoid.
+    """
+    for cand in (Path(m), ROOT / m):
+        if cand.is_file():
+            return [ROOT / x for x in cand.read_text().split() if x.strip()]
+    raise SystemExit(
+        f"manifest not found: {m}\n"
+        f"  looked in: {', '.join(dict.fromkeys( (str(Path(m).resolve()), str(ROOT / m))))}\n"
+        f"  if this is a cluster checkout, `git pull`; if it is a generated\n"
+        f"  manifest, `python scripts/generate_benchmark_configs.py`")
+
+
 def cells_from(args) -> list[Path]:
     cells: list[Path] = []
     for m in args.manifest or []:
-        cells += [ROOT / x for x in Path(m).read_text().split() if x.strip()]
+        cells += read_manifest(m)
     for cls in args.resources or []:
         suffix = f"_{args.tier}" if args.tier else ""
         man = BENCH / f"manifest_{cls}{suffix}.txt"

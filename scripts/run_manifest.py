@@ -62,8 +62,18 @@ def collect(args) -> list[Path]:
     cells: list[Path] = []
     if args.manifest:
         for m in args.manifest:
-            cells += [ROOT / line for line in
-                      Path(m).read_text().split() if line.strip()]
+            for cand in (Path(m), ROOT / m):
+                if cand.is_file():
+                    cells += [ROOT / line for line in
+                              cand.read_text().split() if line.strip()]
+                    break
+            else:
+                # Same clean failure check_env gives: a missing manifest is
+                # almost always an unpulled checkout, not a typo.
+                raise SystemExit(
+                    f"manifest not found: {m}\n"
+                    f"  looked in: {', '.join(dict.fromkeys( (str(Path(m).resolve()), str(ROOT / m))))}\n"
+                    f"  if this is a cluster checkout, `git pull`")
     if args.resources:
         for cls in args.resources:
             suffix = f"_{args.tier}" if args.tier else ""
