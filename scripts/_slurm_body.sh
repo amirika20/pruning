@@ -60,6 +60,10 @@ python -c "import torch, src.pruning.methods" \
 # blocked connection. Set HF_HUB_OFFLINE=0 to allow in-job downloads.
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export TOKENIZERS_PARALLELISM=false
+# torch-only: stop transformers probing the TensorFlow/Flax backends, which
+# costs seconds of startup per cell and buries the log in absl/oneDNN notices.
+export TRANSFORMERS_NO_TF=1 TRANSFORMERS_NO_FLAX=1 USE_TF=0 USE_FLAX=0
+export TF_CPP_MIN_LOG_LEVEL=3 TF_ENABLE_ONEDNN_OPTS=0
 
 # ── run this task's share ───────────────────────────────────────────────────
 # The loop itself lives in scripts/run_manifest.py, so a local run and a cluster

@@ -44,6 +44,18 @@ BENCH = ROOT / "configs" / "benchmark"
 SCRATCH = os.environ.setdefault(
     "PRUNING_SCRATCH", "/n/netscratch/pehlevan_lab/Lab/akazeminia/pruning")
 
+# transformers probes for TensorFlow and Flax backends when it resolves a
+# checkpoint, and importing TensorFlow costs seconds of startup, a few hundred MB,
+# and a page of absl/oneDNN logging that buries the real output. This project is
+# torch-only, so switch the other backends off BEFORE transformers is imported --
+# these must be set before the first import to have any effect. TF_CPP_* silences
+# TensorFlow's C++ logger in case something else pulls it in anyway.
+for _k, _v in (("TRANSFORMERS_NO_TF", "1"), ("TRANSFORMERS_NO_FLAX", "1"),
+               ("USE_TF", "0"), ("USE_FLAX", "0"),
+               ("TF_CPP_MIN_LOG_LEVEL", "3"), ("TF_ENABLE_ONEDNN_OPTS", "0")):
+    os.environ.setdefault(_k, _v)
+
+
 
 def collect(args) -> list[Path]:
     """The cells to run, in manifest order."""
