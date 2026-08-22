@@ -20,6 +20,11 @@ Per (config, seed) it writes, under
     geometry_shift.csv / similarity.csv   at the reference width, when
                     config.analyze_geometry is set
 
+A seed whose DENSE model is at chance accuracy is skipped, not swept: every unit
+is removable from a network that does nothing, so the capacity would come out
+near 1.0 and read as the best result in the table. Pass --allow-untrained to
+override, which records dense_above_chance=False in the report.
+
 Capacity is FIRST-CROSSING, not max-passing (see src/analysis/metrics). The
 max-passing value is recorded alongside as a diagnostic: a large gap between
 them means the curve oscillates through the tolerance, so the grid is too coarse
@@ -48,7 +53,13 @@ from src.data import build_dataset
 from src.experiments.sweep import format_sweep, sweep_report, sweep_widths
 from src.models import build_model
 from src.reproducibility import run_fingerprint, seed_everything
-from src.training.trainer import train
+from src.training.trainer import evaluate, train
+
+
+def _accuracy_of(model, bundle, device):
+    """(loss, accuracy) of a model on its validation split."""
+    _, val_loader = bundle.loaders(batch_size=None)
+    return evaluate(model, val_loader, bundle.task)
 
 
 def load_model(config: ExperimentConfig, seed: int, device: torch.device):
@@ -87,6 +98,9 @@ def main() -> None:
     ap.add_argument("--fractions", type=float, nargs="*", default=None,
                     help="explicit grid, overrides --grid")
     ap.add_argument("--out", default=None, help="override output_root")
+    ap.add_argument("--allow-untrained", action="store_true",
+                    help="sweep even when the dense model is at chance accuracy "
+                         "(the capacity it reports is meaningless -- see below)")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(message)s",
@@ -104,9 +118,34 @@ def main() -> None:
     logging.info(f"grid: {len(fractions)} widths, "
                  f"{fractions[0]:.3f}..{fractions[-1]:.3f}")
 
+    swept, skipped = [], []
     for seed in seeds:
         t0 = time.perf_counter()
         model, bundle, fp = load_model(config, seed, device)
+
+        # A MODEL AT CHANCE MUST NOT PRODUCE A CAPACITY NUMBER. Everything is
+        # removable from a network that does nothing, so a training failure
+        # reads as the best result in the table rather than as a failure -- which
+        # is exactly what happened on the modular-arithmetic entry, where two of
+        # three seeds never groked and each recorded cap01 = 0.947 across 42
+        # arms. Refuse loudly instead; --allow-untrained overrides.
+        chance = (1.0 / bundle.output_dim if bundle.task == "multiclass"
+                  and bundle.output_dim else None)
+        if chance is not None:
+            _, dense_acc = _accuracy_of(model, bundle, device)
+            floor = max(2.0 * chance, chance + 0.02)
+            if dense_acc is not None and dense_acc < floor:
+                msg = (f"seed {seed}: dense accuracy {dense_acc:.4f} is at chance "
+                       f"({chance:.4f}; floor {floor:.4f}) -- the model did not "
+                       f"train, so any capacity from it is meaningless")
+                if not args.allow_untrained:
+                    logging.error(msg + "; skipping this seed "
+                                  "(--allow-untrained to override)")
+                    skipped.append(seed)
+                    continue
+                logging.warning(msg + "; sweeping anyway as requested")
+                fp["dense_above_chance"] = False
+
         widths = [model.prunable_layer(i).weight.shape[0]
                   for i in range(model.n_prunable_layers())]
         logging.info(f"seed {seed}: {len(widths)} prunable layers, "
@@ -142,8 +181,18 @@ def main() -> None:
             except Exception as exc:                      # noqa: BLE001
                 logging.warning(f"analysis skipped: {type(exc).__name__}: {exc}")
 
+        swept.append(seed)
         logging.info(f"seed {seed} done in {time.perf_counter() - t0:.1f}s -> {out}")
 
+    # EXIT NON-ZERO WHEN NOTHING WAS SWEPT. Returning normally here would let
+    # run_manifest print "ok" for a cell that produced no curve at all, which is
+    # the same silent-success bug the chance guard exists to prevent -- one level
+    # up. A partial cell (some seeds groked, some did not) also exits non-zero so
+    # the tier summary names it.
+    if skipped:
+        print(f"cell INCOMPLETE: {root} -- swept {swept}, "
+              f"skipped {skipped} (at chance)", file=sys.stderr)
+        sys.exit(1)
     print(f"cell complete: {root}")
 
 

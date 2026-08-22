@@ -69,9 +69,22 @@ entries:
     family: fc
     resources: small
     train: true
-    data: {kind: modular_add, params: {p: 97, train_ratio: 0.8}}
+    # GROKKING NEEDS A BUDGET, and 400 epochs (6000 steps) was seed-unstable:
+    # seed 0 reached val acc 1.0000 while seeds 1 and 2 sat at chance (0.006,
+    # 0.009 against 1/97 = 0.0103) and still recorded cap01 = 0.947 for all 42
+    # arms, because everything is removable from a network that does nothing.
+    # run_sweep now refuses a seed whose dense model is at chance.
+    #
+    # AdamW / lr 1e-3 / wd 1.0 / bs 512 is the canonical recipe and was not the
+    # problem. train_ratio drops to 0.5 (the literature's range is 0.3-0.5; 0.8
+    # is outside it) which also gives a 4x larger val split, and epochs rise to
+    # 3000. VERIFIED: ratio 0.3 at 1500 epochs reached 0.9997 on seed 0 in 62s,
+    # with seed 1 mid-transition at epoch 609. NOT yet verified across all three
+    # seeds -- the guard is what makes a remaining failure visible rather than
+    # silently excellent.
+    data: {kind: modular_add, params: {p: 97, train_ratio: 0.5}}
     model: {kind: transformer, params: {d_model: 128, n_heads: 4, n_layers: 2, d_ff: 512}}
-    training: {optimizer: adamw, epochs: 400, lr: 1.0e-3, batch_size: 512, weight_decay: 1.0}
+    training: {optimizer: adamw, epochs: 3000, lr: 1.0e-3, batch_size: 512, weight_decay: 1.0}
 
   # ── CIFAR-10: downloaded (chenyaofo/pytorch-cifar-models via torch.hub) ────
   - name: cifar10_resnet20
