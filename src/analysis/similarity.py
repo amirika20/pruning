@@ -71,6 +71,7 @@ uses the BN-folded filter codes with the box measured over im2col patches.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Sequence
 
 import numpy as np
@@ -118,8 +119,13 @@ def similarity_matrices(model: PrunableModel, layer_idx: int, x: torch.Tensor,
         from src.pruning.methods.mash import extract_units
         units, _ = extract_units(model, layer_idx)
         mass = units.mass
-    except Exception:
-        pass
+    except Exception as exc:                            # noqa: BLE001
+        # Without masses the delta_f and cylinder matrices are simply absent, so
+        # their columns vanish from the table and a broken layer reads as "not
+        # applicable". Warn, so the difference is visible.
+        logging.warning(
+            f"similarity layer {layer_idx}: no unit masses "
+            f"({type(exc).__name__}: {exc}); delta_f/cylinder columns omitted")
 
     if "delta_f" in kinds and mass is not None:
         # phi here is the RAW response (it carries alpha); the unit-gain

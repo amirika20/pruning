@@ -58,6 +58,7 @@ which `prune_model`'s report carries.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Sequence
 
 import numpy as np
@@ -312,20 +313,29 @@ def geometry_shift(model_before: PrunableModel, model_after: PrunableModel,
         # embedding radius is identical on both sides
         x0 = np.zeros(ub.shape[1])
         radius = 1.0
+        box_measured = True
         try:
             from src.pruning.methods.mash import _layer_inputs
             Z = _layer_inputs(model_before, li, x)
             lo, hi = Z.min(axis=0), Z.max(axis=0)
             x0 = (lo + hi) / 2.0
             radius = float(np.linalg.norm((hi - lo) / 2.0))
-        except Exception:
-            pass
+        except Exception as exc:                        # noqa: BLE001
+            # The `wq` embedding IS the box-scaled one, so falling back to
+            # radius=1 does not degrade the metric gracefully -- it silently
+            # reports a different quantity under the same column name. Say so,
+            # in the log and in the row, rather than emitting a plausible number.
+            box_measured = False
+            logging.warning(
+                f"geometry_shift layer {li}: could not measure the input box "
+                f"({type(exc).__name__}: {exc}); wq columns fall back to "
+                f"radius=1 and are NOT comparable -- see box_measured")
 
         for kind in kinds:
             Bb = build_B(kind, ub, rb, mb, x0, radius)
             Ba = build_B(kind, ua, ra, ma, x0, radius)
             sb, sa = spectrum(Bb), spectrum(Ba)
-            row = {**base, "B": kind, **fn}
+            row = {**base, "B": kind, "box_measured": box_measured, **fn}
             row.update({f"{k}_before": v for k, v in sb.items()})
             row.update({f"{k}_after": v for k, v in sa.items()})
             for k in ("trace", "fro", "stable_rank", "participation_ratio",
