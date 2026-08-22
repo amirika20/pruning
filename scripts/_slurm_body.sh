@@ -48,10 +48,15 @@ echo "results:  $RESULTS_ROOT"
 echo "caches:   TORCH_HOME=$TORCH_HOME  HF_HOME=$HF_HOME"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 
-# Fail fast with a clear message rather than a traceback from inside the runner:
-# a SLURM retry costs a queue wait, not just a rerun.
-python -c "import torch, src.pruning.methods" \
-    || { echo "repo deps missing in this env (need torch + the src package importable from the repo root)" >&2; exit 1; }
+# Fail fast, and check what THIS manifest actually needs. A missing optional
+# package is the worst cluster failure mode: the array starts, and only the cells
+# that need the package fail -- `datasets` absent takes out every OPT cell while
+# the CIFAR cells succeed beside them and the run looks half-healthy.
+if [[ "$TARGET" == *.yaml ]]; then
+    python scripts/check_env.py || exit 1
+else
+    python scripts/check_env.py --manifest "$TARGET" || exit 1
+fi
 
 # Compute nodes are frequently network-isolated, and every pretrained entry
 # downloads weights on first use. Warm the caches from a login node first:

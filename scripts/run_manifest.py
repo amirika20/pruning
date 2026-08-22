@@ -112,6 +112,15 @@ def main() -> None:
             print(f"  {c.relative_to(ROOT) if c.is_relative_to(ROOT) else c}")
         return
 
+    # Same preflight the job scripts run: better to hear "12 cells need
+    # `datasets`" now than a ModuleNotFoundError partway through the batch.
+    check = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "check_env.py")]
+        + sum([["--manifest", m] for m in (args.manifest or [])], []),
+        cwd=ROOT)
+    if check.returncode != 0:
+        raise SystemExit("environment check failed; nothing run")
+
     failed: list[str] = []
     start = time.perf_counter()
     for i, cfg in enumerate(cells, 1):
