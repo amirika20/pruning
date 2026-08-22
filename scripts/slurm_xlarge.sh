@@ -9,6 +9,7 @@
 #SBATCH --time=24:00:00
 #SBATCH --partition=kempner
 #SBATCH --account=kempner_pehlevan_lab
+#SBATCH --requeue
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=akazeminia@g.harvard.edu
 #

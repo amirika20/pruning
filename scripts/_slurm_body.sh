@@ -42,7 +42,9 @@ RESULTS_ROOT="${RESULTS_ROOT:-$PRUNING_SCRATCH/results}"
 mkdir -p "$TORCH_HOME" "$HF_HOME" "$RESULTS_ROOT"
 
 STAMP="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-local}}${SLURM_ARRAY_TASK_ID:+_$SLURM_ARRAY_TASK_ID}"
-mv -f "logs/slurm_${SLURM_JOB_ID}.log" \
+# :- defaults throughout: SLURM always sets these, but `set -u` would otherwise
+# abort a local run of this script at line 1, defeating the test recipe above.
+mv -f "logs/slurm_${SLURM_JOB_ID:-}.log" \
       "logs/$(basename "${TARGET%.*}")_${STAMP}.log" 2>/dev/null || true
 
 module load python
@@ -55,6 +57,32 @@ echo "scratch:  $PRUNING_SCRATCH"
 echo "results:  $RESULTS_ROOT"
 echo "caches:   TORCH_HOME=$TORCH_HOME  HF_HOME=$HF_HOME"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
+
+# ── GPU preflight ───────────────────────────────────────────────────────────
+# A node can be allocated with its GPU unusable (cudaErrorDevicesUnavailable),
+# which took out 12 cells of the first small run: torch imports fine, every cell
+# fails at the first .to(device), and the task burns its slot failing 12 times.
+# Test the GPU with a real allocation and matmul -- cuda.is_available() alone
+# returns True on a node whose GPU is held by a dying process -- and requeue the
+# task onto a different node instead of grinding through the manifest. Requeued
+# at most once (SLURM_RESTART_COUNT), so a cluster-wide fault fails rather than
+# looping.
+if ! python -c "
+import torch, sys
+if not torch.cuda.is_available(): sys.exit('no CUDA device visible')
+x = torch.randn(256, 256, device='cuda'); (x @ x).sum().item()
+torch.cuda.synchronize()
+print(f'gpu ok: {torch.cuda.get_device_name(0)}')
+"; then
+    echo "GPU UNUSABLE on $(hostname) -- not running the manifest" >&2
+    if [[ -n "${SLURM_JOB_ID:-}" && "${SLURM_RESTART_COUNT:-0}" -lt 1 ]]; then
+        echo "requeueing job $SLURM_JOB_ID onto another node" >&2
+        scontrol requeue "${SLURM_ARRAY_JOB_ID:-$SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID:-0}" \
+            2>/dev/null || scontrol requeue "$SLURM_JOB_ID" || true
+        sleep 10
+    fi
+    exit 1
+fi
 
 # Fail fast, and check what THIS manifest actually needs. A missing optional
 # package is the worst cluster failure mode: the array starts, and only the cells

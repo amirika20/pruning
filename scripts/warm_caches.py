@@ -32,8 +32,10 @@ the datasets download too (MNIST/Fashion to ~/.cache/mnist, CIFAR to
 ~/.cache/cifar, WikiText through HuggingFace), and a job that has to fetch one
 will fail rather than wait.
 
-Weights land in ~/.cache/torch (torchvision, torch.hub) and
-~/.cache/huggingface (OPT + tokenizers). Nothing is trained and no dataset is
+Weights land in $PRUNING_SCRATCH/cache/{torch,huggingface} -- the SAME paths the
+job scripts export as TORCH_HOME and HF_HOME, which is what makes a warmed cache
+visible to a compute node. Overriding PRUNING_SCRATCH here without overriding it
+at submit time is the one way to warm a cache the jobs cannot see. Nothing is trained and no dataset is
 touched -- this only fetches model weights, so it is safe to run repeatedly.
 """
 from __future__ import annotations
