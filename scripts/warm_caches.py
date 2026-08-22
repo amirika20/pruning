@@ -12,6 +12,19 @@ Model files are FETCHED, never instantiated: building a 13b model to warm its
 cache needs ~52GB of RAM and gets OOM-killed on a login node after the download
 has already succeeded.
 
+RE-RUNNING IS CHEAP AND NEVER RE-DOWNLOADS.
+  * torchvision skips by itself -- MNIST's download() returns early on
+    _check_exists() and CIFAR-10's on _check_integrity(). Verified: a --force
+    rebuild of MNIST left every raw file's mtime, size and md5 identical.
+  * on top of that, a dataset whose marker directory is already populated is
+    skipped entirely, so a re-run costs ~0.1s instead of re-reading every image
+    into tensors. --force re-materializes (5.2s for MNIST) without re-fetching.
+  * snapshot_download is incremental: complete files are left alone, so an
+    interrupted weights download resumes rather than restarting.
+  * the six WikiText entries share one raw dataset, so the first warms it and the
+    rest skip. Their per-size tokenizers come from the weights pass, which pulls
+    *.json/*.txt/*.model alongside the checkpoint.
+
 Compute nodes are frequently network-isolated, and the job scripts export
 HF_HUB_OFFLINE=1 so a cold cache fails loudly rather than hanging on a blocked
 connection. Run BOTH forms once, from a node with network, before submitting:
@@ -66,10 +79,44 @@ for _d in ("TORCH_HOME", "HF_HOME"):
               f"set PRUNING_SCRATCH to a writable path", file=sys.stderr)
 
 
+# Where each dataset kind lands on disk, so a warm can say "already there"
+# instead of re-reading every image. torchvision would skip the DOWNLOAD anyway
+# (MNIST returns early on _check_exists, CIFAR-10 on _check_integrity), but
+# build_dataset also materializes tensors, and that is the part worth skipping on
+# a re-run.
+def dataset_marker(kind: str, params: dict) -> Path | None:
+    """A path whose presence means this dataset is already fetched, or None when
+    there is nothing to check (synthetic data, or a local copy)."""
+    root = params.get("root")
+    if kind in ("mnist", "fashion_mnist"):
+        sub = "MNIST" if kind == "mnist" else "FashionMNIST"
+        return Path(root or "~/.cache/mnist").expanduser() / sub / "raw"
+    if kind in ("cifar10", "cifar100"):
+        sub = "cifar-10-batches-py" if kind == "cifar10" else "cifar-100-python"
+        return Path(root or "~/.cache/cifar").expanduser() / sub
+    if kind == "wikitext":
+        # HuggingFace lays the raw dataset down under its datasets cache; the
+        # tokenizer lands in the hub cache and is checked by the weights pass.
+        base = Path(os.environ["HF_DATASETS_CACHE"]).expanduser()
+        hits = list(base.glob("*wikitext*")) if base.exists() else []
+        return hits[0] if hits else base / "Salesforce___wikitext"
+    return None                      # modular_add is synthetic; imagenet is local
+
+
+def marker_ok(path: Path | None) -> bool:
+    """Whether the marker names a directory that exists and holds something."""
+    if path is None or not path.is_dir():
+        return False
+    return any(path.iterdir())
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--entries", nargs="*", default=None)
+    ap.add_argument("--force", action="store_true",
+                    help="re-fetch/re-materialize even when the cache looks "
+                         "complete (use after an interrupted download)")
     ap.add_argument("--datasets", action="store_true",
                     help="materialize each entry's DATASET instead of its model "
                          "checkpoint (MNIST/Fashion/CIFAR via torchvision, "
@@ -111,7 +158,13 @@ def main() -> None:
     ok = bad = 0
     for e in todo:
         if args.datasets:
-            print(f"--- {e['name']}: {e['data']['kind']}")
+            kind = e["data"]["kind"]
+            print(f"--- {e['name']}: {kind}")
+            marker = dataset_marker(kind, e["data"].get("params") or {})
+            if not args.force and marker_ok(marker):
+                print(f"    cached at {marker} -- skipped (--force to rebuild)")
+                ok += 1
+                continue
             try:
                 sys.path.insert(0, str(ROOT))
                 from src.data import build_dataset
@@ -142,8 +195,12 @@ def main() -> None:
                 # finds the format it looks for first.
                 fmt = ("*.safetensors" if any(f.endswith(".safetensors")
                                               for f in files) else "*.bin")
+                # snapshot_download is incremental: complete files are left
+                # alone and only missing or truncated ones are fetched, so
+                # re-running after an interruption resumes rather than restarts.
                 snapshot_download(repo, allow_patterns=[
-                    "*.json", "*.txt", "*.model", fmt])
+                    "*.json", "*.txt", "*.model", fmt],
+                    force_download=args.force)
                 print(f"    ({fmt} weights + tokenizer files)", end=" ")
             elif kind == "resnet_cifar":
                 import torch
