@@ -110,6 +110,44 @@ def marker_ok(path: Path | None) -> bool:
     return any(path.iterdir())
 
 
+def verify_snapshot(path: Path) -> tuple[bool, str]:
+    """Is this HuggingFace snapshot COMPLETE enough to load offline?
+
+    "Fetching N files" finishing instantly is ambiguous: it means either the
+    shards were already cached, or only the small JSONs matched and the weights
+    are absent. With HF_HUB_OFFLINE=1 in the jobs the difference shows up as a
+    load failure sixteen tasks in, so check it here instead.
+
+    A sharded checkpoint names every shard in its index's weight_map; a
+    single-file one just has the weight file. Either way, resolve the names and
+    confirm the bytes are on disk.
+    """
+    import json
+
+    idx = next((path / n for n in ("model.safetensors.index.json",
+                                   "pytorch_model.bin.index.json")
+                if (path / n).exists()), None)
+    if idx is not None:
+        wanted = sorted(set(json.loads(idx.read_text())["weight_map"].values()))
+    else:
+        wanted = [n for n in ("model.safetensors", "pytorch_model.bin")
+                  if (path / n).exists()]
+        if not wanted:
+            return False, "no weight file and no shard index"
+    missing, total = [], 0
+    for name in wanted:
+        f = path / name
+        # snapshot dirs are symlink farms into blobs/; resolve before sizing
+        if not f.exists() or f.stat().st_size == 0:
+            missing.append(name)
+        else:
+            total += f.stat().st_size
+    if missing:
+        return False, (f"{len(missing)}/{len(wanted)} shard(s) missing, e.g. "
+                       f"{missing[0]}")
+    return True, f"{len(wanted)} shard(s), {total / 2**30:.1f} GiB on disk"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -198,10 +236,15 @@ def main() -> None:
                 # snapshot_download is incremental: complete files are left
                 # alone and only missing or truncated ones are fetched, so
                 # re-running after an interruption resumes rather than restarts.
-                snapshot_download(repo, allow_patterns=[
+                snap = snapshot_download(repo, allow_patterns=[
                     "*.json", "*.txt", "*.model", fmt],
                     force_download=args.force)
-                print(f"    ({fmt} weights + tokenizer files)", end=" ")
+                good, detail = verify_snapshot(Path(snap))
+                if not good:
+                    raise RuntimeError(
+                        f"snapshot incomplete after download: {detail}. "
+                        f"Re-run with --force --entries {e['name']}")
+                print(f"    {fmt}: {detail}")
             elif kind == "resnet_cifar":
                 import torch
                 d = params["depth"]
