@@ -1,5 +1,13 @@
 # Shared body for every scripts/slurm_<class>.sh. Sourced, not executed.
 #
+# HOW TO TEST A CHANGE TO THE SOURCING. SLURM copies the batch script into the
+# node's spool directory, so "$0" inside it is /var/slurmd/.../slurm_script and
+# anything resolved relative to $0 misses this file. Running `bash
+# scripts/slurm_small.sh ...` directly does NOT reproduce that. Copy it first:
+#
+#   d=$(mktemp -d); cp scripts/slurm_small.sh $d/slurm_script
+#   (cd / && SLURM_SUBMIT_DIR=$PWD SLURM_JOB_ID=1 bash $d/slurm_script <manifest>)
+#
 # ONE TASK RUNS MANY CELLS. A benchmark cell (one arm x one model, swept over
 # widths) can take seconds on an MLP, so one SLURM task per cell would spend
 # more time queueing and importing torch than working. Instead each array task
