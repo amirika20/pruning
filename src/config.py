@@ -107,6 +107,18 @@ class ExperimentConfig:
     # forward passes plus SVDs -- turn off for very wide models.
     analyze_geometry: bool = True
     output_root: str = "outputs"
+    # Minimum dense validation accuracy for this cell to mean anything. Capacity
+    # is measured relative to the dense model's own accuracy, so a model that did
+    # not train has a tolerance band just above chance, every width passes, and
+    # the capacity comes out NEAR ONE -- a training failure enters the results as
+    # the best row in the table. run_sweep refuses a seed below this floor.
+    #
+    # None falls back to a generic just-above-chance check, which catches a model
+    # that learned nothing but NOT one that half-learned: the modular-arithmetic
+    # entry needs grokking, and a seed sitting at 30% clears any chance-based
+    # floor while being useless to prune. Set this for any cell where a training
+    # threshold, not mere non-randomness, is what makes the measurement valid.
+    require_accuracy: float | None = None
     notes: str = ""
 
     @classmethod
@@ -119,7 +131,13 @@ class ExperimentConfig:
             pruning=PruningConfig.from_dict(d.get("pruning", {})),
             finetune=TrainingConfig(**d.get("finetune", {})),
             seeds=d.get("seeds", [0]),
+            # deterministic and analyze_geometry were absent here, so a config
+            # setting either to false was silently overridden by the dataclass
+            # default -- the generator has always written both.
+            deterministic=bool(d.get("deterministic", True)),
+            analyze_geometry=bool(d.get("analyze_geometry", True)),
             output_root=d.get("output_root", "outputs"),
+            require_accuracy=d.get("require_accuracy"),
             notes=d.get("notes", ""),
         )
 

@@ -3,6 +3,8 @@ import logging
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+import sys
+
 from tqdm import tqdm
 
 from src.config import TrainingConfig
@@ -84,7 +86,16 @@ def train(
     train_losses, val_losses = [], []
     train_accs, val_accs = [], []
 
-    pbar = tqdm(range(1, cfg.epochs + 1), desc=desc, leave=True)
+    # tqdm REDRAWS ON EVERY ITERATION, and a redraw is a full line in a file.
+    # Unthrottled, one 3000-epoch cell wrote 54k progress lines and the modular
+    # array produced 131 MB of logs, 92% of it bars -- which also buries the
+    # report tables the logs exist for. On a tty, keep the live bar; when stdout
+    # is redirected, throttle to one line every 30s, which still answers "how far
+    # in are we" (~10 lines per cell) without the flood.
+    interactive = sys.stderr.isatty()
+    pbar = tqdm(range(1, cfg.epochs + 1), desc=desc, leave=True,
+                mininterval=0.1 if interactive else 30.0,
+                disable=False)
     for epoch in pbar:
         model.train()
         epoch_loss = 0.0
@@ -128,7 +139,11 @@ def train(
         postfix = {"loss": f"{train_losses[-1]:.4f}", "val": f"{val_losses[-1]:.4f}"}
         if val_accs:
             postfix["acc"] = f"{val_accs[-1]:.3f}"
-        pbar.set_postfix(postfix)
+        # refresh=False when piped: set_postfix defaults to refresh=True, which
+        # forces a redraw every epoch and BYPASSES mininterval -- that, not the
+        # interval, is what wrote a line per epoch into the job logs. With it
+        # off, mininterval governs and tqdm still emits a periodic line.
+        pbar.set_postfix(postfix, refresh=interactive)
 
         if epoch % cfg.log_every == 0:
             msg = (f"Epoch {epoch:4d} | train {train_losses[-1]:.6f}"

@@ -131,13 +131,26 @@ def main() -> None:
         # arms. Refuse loudly instead; --allow-untrained overrides.
         chance = (1.0 / bundle.output_dim if bundle.task == "multiclass"
                   and bundle.output_dim else None)
+        dense_acc = None
         if chance is not None:
             _, dense_acc = _accuracy_of(model, bundle, device)
-            floor = max(2.0 * chance, chance + 0.02)
+            # ALWAYS LOG IT. The first version only logged on failure, so a log
+            # from a passing run said nothing about whether the model had
+            # actually trained -- and confirming that was the whole point.
+            logging.info(f"seed {seed}: dense accuracy {dense_acc:.4f} "
+                         f"(chance {chance:.4f})")
+            # config's require_accuracy when set, else just-above-chance. The
+            # generic floor only catches a model that learned NOTHING: on the
+            # modular entry a seed at 30% cleared it while being useless to
+            # prune, which is what require_accuracy exists for.
+            floor = (config.require_accuracy if config.require_accuracy is not None
+                     else max(2.0 * chance, chance + 0.02))
+            why = ("below require_accuracy" if config.require_accuracy is not None
+                   else "at chance")
             if dense_acc is not None and dense_acc < floor:
-                msg = (f"seed {seed}: dense accuracy {dense_acc:.4f} is at chance "
-                       f"({chance:.4f}; floor {floor:.4f}) -- the model did not "
-                       f"train, so any capacity from it is meaningless")
+                msg = (f"seed {seed}: dense accuracy {dense_acc:.4f} is {why} "
+                       f"(floor {floor:.4f}) -- capacity measured against it "
+                       f"would be meaningless")
                 if not args.allow_untrained:
                     logging.error(msg + "; skipping this seed "
                                   "(--allow-untrained to override)")
@@ -155,7 +168,8 @@ def main() -> None:
                              fractions=fractions, device=device,
                              seed=seed, name=config.name, arm=method.kind)
         rep = sweep_report(curve)
-        rep.update(cell=config.name, arm=method.kind, arm_params=method.params,
+        rep.update(dense_accuracy=dense_acc, require_accuracy=config.require_accuracy,
+                   cell=config.name, arm=method.kind, arm_params=method.params,
                    seed=seed, units=int(sum(widths)), widths=widths,
                    fingerprints=fp, wall_seconds=time.perf_counter() - t0)
 
@@ -190,8 +204,11 @@ def main() -> None:
     # up. A partial cell (some seeds groked, some did not) also exits non-zero so
     # the tier summary names it.
     if skipped:
+        reason = ("below require_accuracy "
+                  f"{config.require_accuracy}" if config.require_accuracy is not None
+                  else "at chance")
         print(f"cell INCOMPLETE: {root} -- swept {swept}, "
-              f"skipped {skipped} (at chance)", file=sys.stderr)
+              f"skipped {skipped} ({reason})", file=sys.stderr)
         sys.exit(1)
     print(f"cell complete: {root}")
 

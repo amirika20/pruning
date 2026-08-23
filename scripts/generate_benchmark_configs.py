@@ -121,6 +121,8 @@ def build_config(entry: dict, arm: dict, defaults: dict,
         "output_root": defaults.get("output_root", "outputs/benchmark"),
         "analyze_geometry": bool(defaults.get("analyze_geometry", True)),
         "deterministic": bool(defaults.get("deterministic", True)),
+        **({"require_accuracy": entry["require_accuracy"]}
+           if entry.get("require_accuracy") is not None else {}),
     }
 
 

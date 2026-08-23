@@ -82,6 +82,12 @@ entries:
     # with seed 1 mid-transition at epoch 609. NOT yet verified across all three
     # seeds -- the guard is what makes a remaining failure visible rather than
     # silently excellent.
+    #
+    # MEASURED at 3000 epochs: seeds 1 and 2 grok (sweep AUC 0.967 / 0.987),
+    # seed 0 only half-learns (AUC 0.158) and cleared the chance floor while
+    # being useless to prune. require_accuracy is the criterion that actually
+    # matches "prune after the val accuracy is high".
+    require_accuracy: 0.9
     data: {kind: modular_add, params: {p: 97, train_ratio: 0.5}}
     model: {kind: transformer, params: {d_model: 128, n_heads: 4, n_layers: 2, d_ff: 512}}
     training: {optimizer: adamw, epochs: 3000, lr: 1.0e-3, batch_size: 512, weight_decay: 1.0}
