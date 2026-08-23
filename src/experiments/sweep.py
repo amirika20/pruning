@@ -90,9 +90,23 @@ def _width_params(cls: type, params: dict, n_units: int, fraction: float) -> dic
 
 
 def _accuracy(model: PrunableModel, bundle: DatasetBundle,
-              batch_size: int = 512) -> tuple[float, float | None]:
-    _, val_loader = bundle.loaders(batch_size)
-    return evaluate(model, val_loader, bundle.task)
+              batch_size: int = 512, split: str = "val") -> tuple[float, float | None]:
+    """Loss and accuracy on `split` ("val" or "test").
+
+    A downloaded checkpoint was trained on the whole official train split, so
+    the val slice carved out of it is training data as far as that model is
+    concerned -- grading it there overstates the dense baseline every capacity
+    is measured against. Pretrained cells pass split="test".
+    """
+    if split == "test":
+        loader = bundle.test_loader(batch_size)
+        if loader is None:
+            raise ValueError(
+                f"eval_split='test' but this dataset has no test split; either "
+                f"give its data params an n_test or use eval_split='val'")
+    else:
+        _, loader = bundle.loaders(batch_size)
+    return evaluate(model, loader, bundle.task)
 
 
 def sweep_widths(
@@ -102,6 +116,7 @@ def sweep_widths(
     params: dict[str, Any] | None = None,
     fractions: Sequence[float] = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8),
     device: torch.device | None = None,
+    eval_split: str = "val",
     n_calib: int | None = None,
     evaluate_fn: Callable[[PrunableModel], dict] | None = None,
     **meta: Any,
@@ -124,7 +139,7 @@ def sweep_widths(
     def measure(m: PrunableModel) -> dict:
         if evaluate_fn is not None:
             return evaluate_fn(m)
-        loss, acc = _accuracy(m, bundle)
+        loss, acc = _accuracy(m, bundle, split=eval_split)
         return {"val_loss": loss, "val_acc": acc}
 
     widths0 = [model.prunable_layer(i).weight.shape[0]

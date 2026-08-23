@@ -136,6 +136,14 @@ class ExperimentConfig:
     # K-matrix number was a comparison against a model barely distinguishable
     # from dense.
     analysis_fraction: float = 0.5
+    # Which split capacity is measured on. "val" is carved out of the TRAINING
+    # set, which is right for a model this pipeline trained -- and wrong for a
+    # downloaded checkpoint, because that checkpoint was trained on the whole
+    # official train split, val included. chenyaofo's cifar10_resnet20 scored
+    # 0.9975 on our val against its published 0.926: we were grading it on data
+    # it had memorized, and every capacity for those cells was measured against
+    # a contaminated baseline. Pretrained entries must use "test".
+    eval_split: str = "val"
     notes: str = ""
 
     @classmethod
@@ -156,6 +164,7 @@ class ExperimentConfig:
             output_root=d.get("output_root", "outputs"),
             require_accuracy=d.get("require_accuracy"),
             analysis_fraction=float(d.get("analysis_fraction", 0.5)),
+            eval_split=str(d.get("eval_split", "val")),
             notes=d.get("notes", ""),
         )
 

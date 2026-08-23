@@ -121,6 +121,9 @@ def build_config(entry: dict, arm: dict, defaults: dict,
         "output_root": defaults.get("output_root", "outputs/benchmark"),
         "analyze_geometry": bool(defaults.get("analyze_geometry", True)),
         "deterministic": bool(defaults.get("deterministic", True)),
+        # A downloaded checkpoint saw the whole official train split, so the val
+        # slice carved from it is training data to that model. Grade it on test.
+        "eval_split": entry.get("eval_split", "val" if trains else "test"),
         **({"require_accuracy": entry["require_accuracy"]}
            if entry.get("require_accuracy") is not None else {}),
     }

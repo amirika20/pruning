@@ -58,10 +58,15 @@ from src.reproducibility import run_fingerprint, seed_everything
 from src.training.trainer import evaluate, train
 
 
-def _accuracy_of(model, bundle, device):
-    """(loss, accuracy) of a model on its validation split."""
-    _, val_loader = bundle.loaders(batch_size=None)
-    return evaluate(model, val_loader, bundle.task)
+def _accuracy_of(model, bundle, device, split="val"):
+    """(loss, accuracy) on `split` -- the same split the sweep measures on."""
+    if split == "test":
+        loader = bundle.test_loader(1024)
+        if loader is None:
+            raise ValueError("eval_split='test' but this dataset has no test split")
+    else:
+        _, loader = bundle.loaders(batch_size=None)
+    return evaluate(model, loader, bundle.task)
 
 
 def load_model(config: ExperimentConfig, seed: int, device: torch.device):
@@ -117,6 +122,7 @@ def main() -> None:
     method = config.pruning.methods[0]
     logging.info(f"cell: {config.name}")
     logging.info(f"arm : {method.kind}  {method.params}")
+    logging.info(f"eval : {config.eval_split} split")
     logging.info(f"grid: {len(fractions)} widths, "
                  f"{fractions[0]:.3f}..{fractions[-1]:.3f}")
 
@@ -138,7 +144,8 @@ def main() -> None:
         # nothing at all -- and the OPT smoke test came back with a capacity of
         # zero and no way to tell whether the checkpoint had loaded, which is
         # precisely what the smoke test existed to establish.
-        dense_loss, dense_acc = _accuracy_of(model, bundle, device)
+        dense_loss, dense_acc = _accuracy_of(model, bundle, device,
+                                             split=config.eval_split)
         if chance is None:
             extra = (f", perplexity {math.exp(min(dense_loss, 60)):.2f}"
                      if bundle.task == "causal_lm" else "")
@@ -177,6 +184,7 @@ def main() -> None:
 
         curve = sweep_widths(model, bundle, method.kind, method.params,
                              fractions=fractions, device=device,
+                             eval_split=config.eval_split,
                              seed=seed, name=config.name, arm=method.kind)
         rep = sweep_report(curve)
         rep.update(dense_accuracy=dense_acc, dense_loss=dense_loss,
