@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import sys
 import time
 from pathlib import Path
@@ -50,7 +51,8 @@ from src.analysis.geometry_shift import geometry_shift
 from src.analysis.similarity import similarity_table
 from src.config import ExperimentConfig
 from src.data import build_dataset
-from src.experiments.sweep import format_sweep, sweep_report, sweep_widths
+from src.experiments.sweep import (format_sweep, prune_at_fraction,
+                                   sweep_report, sweep_widths)
 from src.models import build_model
 from src.reproducibility import run_fingerprint, seed_everything
 from src.training.trainer import evaluate, train
@@ -131,9 +133,18 @@ def main() -> None:
         # arms. Refuse loudly instead; --allow-untrained overrides.
         chance = (1.0 / bundle.output_dim if bundle.task == "multiclass"
                   and bundle.output_dim else None)
-        dense_acc = None
+        # Log the dense metric for EVERY task, not just the ones the guard can
+        # check. On causal_lm dense_acc is None, so the previous version logged
+        # nothing at all -- and the OPT smoke test came back with a capacity of
+        # zero and no way to tell whether the checkpoint had loaded, which is
+        # precisely what the smoke test existed to establish.
+        dense_loss, dense_acc = _accuracy_of(model, bundle, device)
+        if chance is None:
+            extra = (f", perplexity {math.exp(min(dense_loss, 60)):.2f}"
+                     if bundle.task == "causal_lm" else "")
+            logging.info(f"seed {seed}: dense {bundle.task} loss "
+                         f"{dense_loss:.4f}{extra}")
         if chance is not None:
-            _, dense_acc = _accuracy_of(model, bundle, device)
             # ALWAYS LOG IT. The first version only logged on failure, so a log
             # from a passing run said nothing about whether the model had
             # actually trained -- and confirming that was the whole point.
@@ -168,7 +179,8 @@ def main() -> None:
                              fractions=fractions, device=device,
                              seed=seed, name=config.name, arm=method.kind)
         rep = sweep_report(curve)
-        rep.update(dense_accuracy=dense_acc, require_accuracy=config.require_accuracy,
+        rep.update(dense_accuracy=dense_acc, dense_loss=dense_loss,
+                   require_accuracy=config.require_accuracy,
                    cell=config.name, arm=method.kind, arm_params=method.params,
                    seed=seed, units=int(sum(widths)), widths=widths,
                    fingerprints=fp, wall_seconds=time.perf_counter() - t0)
@@ -180,11 +192,18 @@ def main() -> None:
         logging.info("\n" + format_sweep({f"{config.name} s{seed}": rep}))
 
         if config.analyze_geometry:
-            # At the reference width only: these batteries are per-model-pair,
-            # not per-width, and running them at every point would dominate.
+            # At ONE width only: these batteries are per-model-pair, not
+            # per-width, and running them at every point would dominate. That
+            # width is analysis_fraction (default 0.5), budgeted through the same
+            # path the curve uses -- prune_model with a benchmark arm's spec fell
+            # back to n_remove=1 and compared dense against near-dense.
             try:
-                from src.pruning.surgery import prune_model
-                pruned, prep = prune_model(model, config.pruning, bundle, device)
+                pruned, prep = prune_at_fraction(
+                    model, bundle, method.kind, method.params,
+                    fraction=config.analysis_fraction, device=device)
+                logging.info(f"  geometry battery at fraction "
+                             f"{config.analysis_fraction}: removed "
+                             f"{sum(r['removed'] for r in prep)} units")
                 gx = bundle.val_ds.tensors[0][:256].to(device)
                 geometry_shift(model, pruned, prep, gx, seed=seed,
                                name=config.name).to_csv(

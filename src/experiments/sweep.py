@@ -193,6 +193,65 @@ def sweep_widths(
     return df
 
 
+def prune_at_fraction(model: PrunableModel, bundle: DatasetBundle, kind: str,
+                      params: dict[str, Any] | None = None,
+                      fraction: float = 0.5,
+                      device: torch.device | None = None,
+                      n_calib: int | None = None,
+                      ) -> tuple[PrunableModel, list[dict]]:
+    """The pruned model at ONE target width, budgeted exactly as sweep_widths.
+
+    The geometry and similarity batteries need a model pruned to a MEANINGFUL
+    width. Calling prune_model with a benchmark cell's own pruning spec gives
+    the method's default budget instead, which is n_remove=1 -- one unit per
+    layer, so 12 of OPT-125m's 36864 units (0.03%). Every before/after
+    comparison built on that measures a perturbation indistinguishable from
+    none. This routes the same _width_params budget logic the curve uses.
+    """
+    params = dict(params or {})
+    cls = PRUNING_METHOD_REGISTRY[kind]
+    current = copy.deepcopy(model)
+    reports: list[dict] = []
+    train_inputs = bundle.train_ds.tensors[0].to(device) if device else \
+        bundle.train_ds.tensors[0]
+    for li in range(model.n_prunable_layers()):
+        before = current.prunable_layer(li).weight.shape[0]
+        ctx = PruneContext(train_inputs=train_inputs, bundle=bundle, device=device)
+        if hasattr(cls, "plan") and hasattr(cls, "emit_at"):
+            probe = build_pruning_method(kind, **params)
+            plan = probe.plan(model, li, ctx)
+            decision = probe.emit_at(current, li, plan, plan.merges_for(fraction), ctx)
+        else:
+            wp = _width_params(cls, params, before, fraction)
+            if n_calib is not None and "n_calib" in _accepted_params(cls):
+                wp.setdefault("n_calib", n_calib)
+            decision = build_pruning_method(kind, **wp).select(current, li, ctx)
+        current, selected, applied = apply_decision(current, li, decision)
+        if selected:
+            current = current.prune_layer(li, sorted(selected))
+        after = current.prunable_layer(li).weight.shape[0]
+        # SAME SCHEMA AS prune_model's report. geometry_shift and
+        # similarity_table read neurons_before/removed_indices off these entries;
+        # a near-miss here is swallowed by the caller's except-and-warn and the
+        # whole analysis silently produces nothing.
+        merge_ops = ([{"removed": int(o.removed), "survivor": int(o.survivor),
+                       "scale": float(o.scale)} for o in applied] if applied else [])
+        reports.append({
+            "layer": li,
+            "neurons_before": before,
+            "removed_per_method": {kind: len(selected)},
+            "total_removed": len(selected),
+            "neurons_after": after,
+            "removed_indices": sorted(int(i) for i in selected),
+            "removed_indices_per_method": {kind: sorted(int(i) for i in selected)},
+            "merge_ops": {kind: merge_ops} if merge_ops else {},
+            "diagnostics": ({kind: decision.diagnostics}
+                            if getattr(decision, "diagnostics", None) else {}),
+            "removed": before - after,
+        })
+    return current, reports
+
+
 def sweep_report(df: pd.DataFrame, drops: Sequence[float] = (0.005, 0.01, 0.02),
                  sustain: int = 1) -> dict:
     """Capacity readings plus the cost of having produced the curve."""

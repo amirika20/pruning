@@ -129,6 +129,13 @@ class ExperimentConfig:
     # floor while being useless to prune. Set this for any cell where a training
     # threshold, not mere non-randomness, is what makes the measurement valid.
     require_accuracy: float | None = None
+    # Width the geometry/similarity batteries compare dense against. They used
+    # the cell's own pruning spec, which for a benchmark arm carries no budget --
+    # so the method's default applied, n_remove=1: ONE unit per layer, 12 of
+    # OPT-125m's 36864 (0.03%). Every participation-ratio, subspace-alignment and
+    # K-matrix number was a comparison against a model barely distinguishable
+    # from dense.
+    analysis_fraction: float = 0.5
     notes: str = ""
 
     @classmethod
@@ -148,6 +155,7 @@ class ExperimentConfig:
             analyze_geometry=bool(d.get("analyze_geometry", True)),
             output_root=d.get("output_root", "outputs"),
             require_accuracy=d.get("require_accuracy"),
+            analysis_fraction=float(d.get("analysis_fraction", 0.5)),
             notes=d.get("notes", ""),
         )
 
