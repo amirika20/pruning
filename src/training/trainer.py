@@ -145,6 +145,14 @@ def train(
         # off, mininterval governs and tqdm still emits a periodic line.
         pbar.set_postfix(postfix, refresh=interactive)
 
+        if (cfg.stop_at_accuracy is not None and val_accs
+                and val_accs[-1] >= cfg.stop_at_accuracy):
+            pbar.set_postfix(postfix, refresh=True)
+            print(f"\nreached val accuracy {val_accs[-1]:.4f} "
+                  f">= stop_at_accuracy {cfg.stop_at_accuracy} at epoch {epoch}"
+                  f" of {cfg.epochs}; stopping", flush=True)
+            break
+
         if epoch % cfg.log_every == 0:
             msg = (f"Epoch {epoch:4d} | train {train_losses[-1]:.6f}"
                    f" | val {val_losses[-1]:.6f}")

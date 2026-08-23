@@ -90,7 +90,13 @@ entries:
     require_accuracy: 0.9
     data: {kind: modular_add, params: {p: 97, train_ratio: 0.5}}
     model: {kind: transformer, params: {d_model: 128, n_heads: 4, n_layers: 2, d_ff: 512}}
-    training: {optimizer: adamw, epochs: 3000, lr: 1.0e-3, batch_size: 512, weight_decay: 1.0}
+    # epochs is a BUDGET here, not a duration: stop_at_accuracy ends training the
+    # epoch val accuracy hits 0.99. At a fixed 3000, seeds 1 and 2 groked (sweep
+    # AUC 0.962 / 0.986) and seed 0 reached only ~0.26 -- so raise the ceiling to
+    # 8000 for the slow seed and let the fast ones stop early instead of guessing
+    # a count that suits neither.
+    training: {optimizer: adamw, epochs: 8000, lr: 1.0e-3, batch_size: 512,
+               weight_decay: 1.0, stop_at_accuracy: 0.99}
 
   # ── CIFAR-10: downloaded (chenyaofo/pytorch-cifar-models via torch.hub) ────
   - name: cifar10_resnet20

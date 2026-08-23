@@ -15,10 +15,11 @@ model:
     d_ff: 512
 training:
   optimizer: adamw
-  epochs: 3000
+  epochs: 8000
   lr: 0.001
   batch_size: 512
   weight_decay: 1.0
+  stop_at_accuracy: 0.99
 pruning:
   methods:
   - kind: random

@@ -58,6 +58,16 @@ class TrainingConfig:
     # loss. Serra et al. (NeurIPS 2021) use it to induce the ReLU stability
     # that lossless compression (leo_pp) exploits.
     l1: float = 0.0
+    # Stop once validation accuracy reaches this, treating `epochs` as a BUDGET
+    # rather than a duration. Grokking time is strongly seed-dependent -- at 3000
+    # epochs two modular seeds groked and one reached ~0.26 -- so a fixed count
+    # either starves the slow seed or wastes epochs on the fast ones. Stopping on
+    # the outcome does both correctly and usually costs less.
+    #
+    # This reads validation accuracy to decide when training is DONE, which is
+    # legitimate here (nothing is tuned on it, and capacity is already measured
+    # against dense val accuracy) but would not be if it selected between models.
+    stop_at_accuracy: float | None = None
     log_every: int = 50
     device: str = field(default_factory=_default_device)
 
