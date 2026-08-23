@@ -74,13 +74,20 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 # task onto a different node instead of grinding through the manifest. Requeued
 # at most once (SLURM_RESTART_COUNT), so a cluster-wide fault fails rather than
 # looping.
-# RETRY BEFORE GIVING UP. The first modular run lost 7 tasks to
+# RETRY, PATIENTLY, THEN STOP. The modular run lost 7 tasks to
 # cudaErrorDevicesUnavailable, all on one node that also ran 8 tasks
-# successfully -- so the GPU was CONTENDED, not broken: another process still
-# held it as our task started. A few seconds of patience recovers that case,
-# where a requeue costs a full trip through the queue.
+# successfully -- the GPU was CONTENDED, not broken: another process still held
+# it. So waiting is the right response, and 5 minutes of it is far cheaper than a
+# trip through the queue.
+#
+# WHAT DOES NOT WORK: requeueing. `scontrol update ExcNodeList` is REJECTED on a
+# running job ("Job is no longer pending execution"), so the earlier version's
+# exclusion silently failed and the bare requeue handed the task straight back to
+# the same node -- three attempts, same node, three wasted queue slots. A job
+# cannot edit its own allocation, so the exclusion has to come from the submit
+# line. This records the node and prints that command instead of pretending.
 gpu_ok=0
-for attempt in 1 2 3; do
+for attempt in $(seq 1 10); do
     if python -c "
 import torch, sys
 if not torch.cuda.is_available(): sys.exit('no CUDA device visible')
@@ -88,24 +95,19 @@ x = torch.randn(256, 256, device='cuda'); (x @ x).sum().item()
 torch.cuda.synchronize()
 print(f'gpu ok: {torch.cuda.get_device_name(0)}')
 "; then gpu_ok=1; break; fi
-    echo "GPU probe attempt $attempt/3 failed on $(hostname -s); waiting 20s" >&2
-    sleep 20
+    echo "GPU probe $attempt/10 failed on $(hostname -s); waiting 30s" >&2
+    sleep 30
 done
 
 if [[ "$gpu_ok" -ne 1 ]]; then
-    echo "GPU UNUSABLE on $(hostname) after 3 attempts -- not running the manifest" >&2
-    if [[ -n "${SLURM_JOB_ID:-}" && "${SLURM_RESTART_COUNT:-0}" -lt 2 ]]; then
-        JOBREF="${SLURM_ARRAY_JOB_ID:+${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}}"
-        JOBREF="${JOBREF:-$SLURM_JOB_ID}"
-        # EXCLUDE THIS NODE FIRST. A bare requeue is what failed last time:
-        # SLURM handed the task straight back to the same contended node, the
-        # retry failed identically, and the one-requeue cap gave up. Adding the
-        # node to the job's exclusion list makes the retry land elsewhere.
-        echo "excluding $(hostname -s) and requeueing $JOBREF" >&2
-        scontrol update jobid="$JOBREF" ExcNodeList="$(hostname -s)" || true
-        scontrol requeue "$JOBREF" || true
-        sleep 10
-    fi
+    BAD="$(hostname -s)"
+    echo "GPU UNUSABLE on $BAD after 10 probes over 5 minutes" >&2
+    # A deduplicated list the next submission can consume directly.
+    touch logs/bad_nodes.txt
+    grep -qxF "$BAD" logs/bad_nodes.txt || echo "$BAD" >> logs/bad_nodes.txt
+    echo "recorded in logs/bad_nodes.txt -- resubmit excluding it:" >&2
+    echo "    sbatch --exclude=$(paste -sd, logs/bad_nodes.txt) <script> $TARGET" >&2
+    echo "and report $BAD to FASRC: a GPU held by a stuck process" >&2
     exit 1
 fi
 

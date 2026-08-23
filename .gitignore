@@ -13,3 +13,4 @@ data_cache/
 *.synctex.gz
 *.toc
 *.blg
+logs/bad_nodes.txt
