@@ -207,9 +207,20 @@ def main() -> None:
         reason = ("below require_accuracy "
                   f"{config.require_accuracy}" if config.require_accuracy is not None
                   else "at chance")
-        print(f"cell INCOMPLETE: {root} -- swept {swept}, "
+        # PARTIAL IS NOT FAILURE. Exiting non-zero on any skipped seed would mark
+        # all 50 modular cells failed, since seed 0 reproducibly does not grok --
+        # turning "2 of 3 seeds are valid" into "the tier failed", which hides the
+        # good data as effectively as the original bug published the bad. A
+        # skipped seed writes no report, so aggregation sees the 2 real seeds and
+        # cannot average in a phantom third. Nothing swept at all IS failure.
+        state = "INCOMPLETE" if swept else "FAILED"
+        print(f"cell {state}: {root} -- swept {swept}, "
               f"skipped {skipped} ({reason})", file=sys.stderr)
-        sys.exit(1)
+        if not swept:
+            sys.exit(1)
+        print(f"cell complete (PARTIAL): {root} -- {len(swept)} of "
+              f"{len(seeds)} seeds usable")
+        return
     print(f"cell complete: {root}")
 
 

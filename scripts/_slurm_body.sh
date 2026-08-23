@@ -41,7 +41,14 @@ export HF_DATASETS_CACHE="$PRUNING_SCRATCH/cache/huggingface/datasets"
 RESULTS_ROOT="${RESULTS_ROOT:-$PRUNING_SCRATCH/results}"
 mkdir -p "$TORCH_HOME" "$HF_HOME" "$RESULTS_ROOT"
 
+# The attempt number belongs in the log name. Without it a requeued attempt
+# reopens the same path and OVERWRITES its predecessor, so the first attempt's
+# diagnosis is lost -- which is why the modular run looked like the GPU preflight
+# had failed to requeue: the requeue had happened, the retry landed on the same
+# contended node, and attempt 1's log (with RESTART_COUNT=1, so no requeue line)
+# had replaced attempt 0's.
 STAMP="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-local}}${SLURM_ARRAY_TASK_ID:+_$SLURM_ARRAY_TASK_ID}"
+[[ "${SLURM_RESTART_COUNT:-0}" -gt 0 ]] && STAMP="${STAMP}_try$((SLURM_RESTART_COUNT + 1))"
 # :- defaults throughout: SLURM always sets these, but `set -u` would otherwise
 # abort a local run of this script at line 1, defeating the test recipe above.
 mv -f "logs/slurm_${SLURM_JOB_ID:-}.log" \
@@ -67,18 +74,36 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 # task onto a different node instead of grinding through the manifest. Requeued
 # at most once (SLURM_RESTART_COUNT), so a cluster-wide fault fails rather than
 # looping.
-if ! python -c "
+# RETRY BEFORE GIVING UP. The first modular run lost 7 tasks to
+# cudaErrorDevicesUnavailable, all on one node that also ran 8 tasks
+# successfully -- so the GPU was CONTENDED, not broken: another process still
+# held it as our task started. A few seconds of patience recovers that case,
+# where a requeue costs a full trip through the queue.
+gpu_ok=0
+for attempt in 1 2 3; do
+    if python -c "
 import torch, sys
 if not torch.cuda.is_available(): sys.exit('no CUDA device visible')
 x = torch.randn(256, 256, device='cuda'); (x @ x).sum().item()
 torch.cuda.synchronize()
 print(f'gpu ok: {torch.cuda.get_device_name(0)}')
-"; then
-    echo "GPU UNUSABLE on $(hostname) -- not running the manifest" >&2
-    if [[ -n "${SLURM_JOB_ID:-}" && "${SLURM_RESTART_COUNT:-0}" -lt 1 ]]; then
-        echo "requeueing job $SLURM_JOB_ID onto another node" >&2
-        scontrol requeue "${SLURM_ARRAY_JOB_ID:-$SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID:-0}" \
-            2>/dev/null || scontrol requeue "$SLURM_JOB_ID" || true
+"; then gpu_ok=1; break; fi
+    echo "GPU probe attempt $attempt/3 failed on $(hostname -s); waiting 20s" >&2
+    sleep 20
+done
+
+if [[ "$gpu_ok" -ne 1 ]]; then
+    echo "GPU UNUSABLE on $(hostname) after 3 attempts -- not running the manifest" >&2
+    if [[ -n "${SLURM_JOB_ID:-}" && "${SLURM_RESTART_COUNT:-0}" -lt 2 ]]; then
+        JOBREF="${SLURM_ARRAY_JOB_ID:+${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}}"
+        JOBREF="${JOBREF:-$SLURM_JOB_ID}"
+        # EXCLUDE THIS NODE FIRST. A bare requeue is what failed last time:
+        # SLURM handed the task straight back to the same contended node, the
+        # retry failed identically, and the one-requeue cap gave up. Adding the
+        # node to the job's exclusion list makes the retry land elsewhere.
+        echo "excluding $(hostname -s) and requeueing $JOBREF" >&2
+        scontrol update jobid="$JOBREF" ExcNodeList="$(hostname -s)" || true
+        scontrol requeue "$JOBREF" || true
         sleep 10
     fi
     exit 1
