@@ -552,7 +552,27 @@ class HOPE(PruningMethod):
         # geometry once, then only re-derive the rows a merge actually touched
         # (step 3's "localized update"). O(N^2) init + O(N) per merge, versus
         # O(N^2) parent solves per step for a naive rescan.
+        # close_parent is four scalar ops on the pair's cached (a, b) and the
+        # layer's current E_rem, so the whole scan vectorizes. Kept as PARALLEL
+        # ARRAYS beside the dict: the original scanned this in Python once per
+        # removal step -- H^2/2 = 130,816 entries x ~486 steps = 63.6M iterations
+        # with a call each, which is where hope_exact's ~3900s/seed went, not in
+        # the mathematics. Insertion order is preserved and the masked argmin
+        # returns the first minimum, so ties break exactly as the strict `<` scan
+        # broke them.
         geo_cache: dict[tuple[int, int], dict] = {}
+        P_i: list[int] = []
+        P_j: list[int] = []
+        P_a: list[float] = []
+        P_b: list[float] = []
+        stale: list[bool] = []
+
+        def _remember(i0: int, j0: int, g: dict) -> None:
+            geo_cache[(i0, j0)] = g
+            P_i.append(i0); P_j.append(j0)
+            P_a.append(float(g["a"])); P_b.append(float(g["b"]))
+            stale.append(False)
+
         if can_merge:
             act0 = np.flatnonzero(active)
             for ai in range(len(act0)):
@@ -560,7 +580,7 @@ class HOPE(PruningMethod):
                     i0, j0 = int(act0[ai]), int(act0[aj])
                     g = lay.parent_geometry(i0, j0)
                     if g:
-                        geo_cache[(i0, j0)] = g
+                        _remember(i0, j0, g)
 
         while len(removed) < n_remove and active.sum() > 1:
             idx = np.flatnonzero(active)
@@ -569,15 +589,39 @@ class HOPE(PruningMethod):
             best_p = int(np.argmin(j_prune))
             best = ("prune", float(j_prune[best_p]), int(idx[best_p]), -1, {})
 
-            if can_merge:
+            if can_merge and P_i:
                 E_tot = float(lay.cap[idx].sum())
-                for (ii, jj), geo in geo_cache.items():
-                    if not (active[ii] and active[jj]):
-                        continue
-                    E_rem = E_tot - float(lay.cap[ii]) - float(lay.cap[jj])
-                    c, p = lay.merge_cost_cached(geo, E_rem, n)
-                    if c < best[1]:
-                        best = ("merge", c, ii, jj, p)
+                Ai = np.fromiter(P_i, dtype=np.intp, count=len(P_i))
+                Aj = np.fromiter(P_j, dtype=np.intp, count=len(P_j))
+                aa = np.fromiter(P_a, dtype=np.float64, count=len(P_a))
+                bb = np.fromiter(P_b, dtype=np.float64, count=len(P_b))
+                ok = (~np.fromiter(stale, dtype=bool, count=len(stale))
+                      & active[Ai] & active[Aj])
+                if ok.any():
+                    # Exactly close_parent + merge_cost_cached, vectorized. Same
+                    # rejections: non-positive denominator, non-finite or
+                    # non-positive scale, non-positive cost denominator -> inf.
+                    E_rem = E_tot - lay.cap[Ai] - lay.cap[Aj]
+                    a_, b_, E_ = aa[ok], bb[ok], E_rem[ok]
+                    cost = np.full(a_.shape, np.inf)
+                    den1 = 2.0 * E_ + b_
+                    g1 = den1 > _TINY
+                    with np.errstate(invalid="ignore", divide="ignore"):
+                        sc = np.where(g1, (a_ + b_ * E_) / np.where(g1, den1, 1.0), -1.0)
+                        g2 = g1 & np.isfinite(sc) & (sc > 0.0)
+                        d2 = np.maximum(a_ - 2.0 * sc * b_ + 2.0 * sc * sc, 0.0)
+                        den2 = E_ + sc
+                        g3 = g2 & (den2 > _TINY)
+                        cost = np.where(g3, n * np.sqrt(d2) / np.where(g3, den2, 1.0),
+                                        np.inf)
+                    k = int(np.argmin(cost))
+                    if cost[k] < best[1]:
+                        w = np.flatnonzero(ok)[k]
+                        ii, jj = int(Ai[w]), int(Aj[w])
+                        c, pp = lay.merge_cost_cached(
+                            geo_cache[(ii, jj)], float(E_rem[w]), n)
+                        if c < best[1]:
+                            best = ("merge", c, ii, jj, pp)
 
             if best[0] == "prune":
                 i = best[2]
@@ -591,13 +635,19 @@ class HOPE(PruningMethod):
                 # pair touching i is stale; pairs touching j die with it.
                 for key in [k for k in geo_cache if i in k or j in k]:
                     del geo_cache[key]
+                # Mirror the deletion in the arrays. Marked stale rather than
+                # removed so insertion order -- and therefore tie-breaking --
+                # survives; appends below take the freshly derived rows.
+                for t, (pi, pj) in enumerate(zip(P_i, P_j)):
+                    if pi in (i, j) or pj in (i, j):
+                        stale[t] = True
                 for other in np.flatnonzero(active):
                     o = int(other)
                     if o in (i, j):
                         continue
                     g = lay.parent_geometry(min(i, o), max(i, o))
                     if g:
-                        geo_cache[(min(i, o), max(i, o))] = g
+                        _remember(min(i, o), max(i, o), g)
                 active[j] = False
                 removed.append(j)
                 lay.cap[j] = 0.0
