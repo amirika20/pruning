@@ -151,16 +151,34 @@ entries:
     arms_tier: all
     family: fc
     resources: medium
+    # n_test was null = the full official test split, ~560 chunks against the
+    # 32 of n_val. Every one of the sweep's 17 evaluations pays that, turning a
+    # 9s sweep into ~10 min/seed, and the unbounded batch OOMed at 53.8 GiB
+    # before LM_EVAL_BATCH capped it. 128 chunks is 65k tokens -- ample for a
+    # stable perplexity and for comparing arms, which all see the same subset.
+    # Quote it as perplexity on a 128-chunk subset, not on the full split.
+    #
+    # hope/hope_exact excluded: see exclude_arms rationale in the generator.
+    exclude_arms: [hope, hope_exact]
     data: {kind: wikitext, params: {tokenizer: facebook/opt-125m, seq_len: 512,
-                                    n_train: 128, n_val: 32, n_test: null}}
+                                    n_train: 128, n_val: 32, n_test: 128}}
     model: {kind: opt, params: {size: 125m, pretrained: true}}
 
   - name: wikitext_opt350m
     arms_tier: all
     family: fc
     resources: medium
+    # n_test was null = the full official test split, ~560 chunks against the
+    # 32 of n_val. Every one of the sweep's 17 evaluations pays that, turning a
+    # 9s sweep into ~10 min/seed, and the unbounded batch OOMed at 53.8 GiB
+    # before LM_EVAL_BATCH capped it. 128 chunks is 65k tokens -- ample for a
+    # stable perplexity and for comparing arms, which all see the same subset.
+    # Quote it as perplexity on a 128-chunk subset, not on the full split.
+    #
+    # hope/hope_exact excluded: see exclude_arms rationale in the generator.
+    exclude_arms: [hope, hope_exact]
     data: {kind: wikitext, params: {tokenizer: facebook/opt-350m, seq_len: 512,
-                                    n_train: 128, n_val: 32, n_test: null}}
+                                    n_train: 128, n_val: 32, n_test: 128}}
     model: {kind: opt, params: {size: 350m, pretrained: true}}
 
   - name: wikitext_opt1.3b

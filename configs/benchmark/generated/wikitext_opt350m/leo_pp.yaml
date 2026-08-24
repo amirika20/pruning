@@ -8,7 +8,7 @@ data:
     seq_len: 512
     n_train: 128
     n_val: 32
-    n_test: null
+    n_test: 128
 model:
   kind: opt
   params:

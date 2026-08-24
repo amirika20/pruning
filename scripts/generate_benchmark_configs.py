@@ -193,6 +193,15 @@ def main() -> None:
                 continue
             if tier == "ablation" and arm["tier"] == "headline":
                 continue
+            if arm["name"] in (entry.get("exclude_arms") or ()):
+                # Measured, not guessed: HOPE's pair enumeration scales H^2.28,
+                # so a 3072-wide OPT layer costs ~1583s to plan and its 12
+                # layers ~5h PER SEED for one arm -- after a 20x speedup. That
+                # cost is intrinsic (a rank-2 solve per pair, unlike Ward's
+                # Lance-Williams update), so the honest move is to declare the
+                # arm unrun at that width rather than spend 90 GPU-hours on it.
+                # hope_prune_only stays: allow_merge=false enumerates nothing.
+                continue
             fam = entry.get("family")
             if arm.get("requires") == "fc" and fam != "fc":
                 # `mixed` (LeNet: conv slots AND fc slots) is treated like conv:
