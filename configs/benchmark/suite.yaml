@@ -160,6 +160,13 @@ entries:
     #
     # hope/hope_exact excluded: see exclude_arms rationale in the generator.
     exclude_arms: [hope, hope_exact]
+    # OFF at this width. The battery cost 1136s per seed on OPT-125m -- about
+    # two thirds of the whole medium tier even restricted to headline arms --
+    # because the K matrix is 3072x3072 per layer and the response SVDs scale
+    # with it. The CIFAR and small-tier geometry still covers the exploratory
+    # questions at a width where the numbers are readable. Set true to measure
+    # it here.
+    analyze_geometry: false
     data: {kind: wikitext, params: {tokenizer: facebook/opt-125m, seq_len: 512,
                                     n_train: 128, n_val: 32, n_test: 128}}
     model: {kind: opt, params: {size: 125m, pretrained: true}}
@@ -177,6 +184,13 @@ entries:
     #
     # hope/hope_exact excluded: see exclude_arms rationale in the generator.
     exclude_arms: [hope, hope_exact]
+    # OFF at this width. The battery cost 1136s per seed on OPT-125m -- about
+    # two thirds of the whole medium tier even restricted to headline arms --
+    # because the K matrix is 3072x3072 per layer and the response SVDs scale
+    # with it. The CIFAR and small-tier geometry still covers the exploratory
+    # questions at a width where the numbers are readable. Set true to measure
+    # it here.
+    analyze_geometry: false
     data: {kind: wikitext, params: {tokenizer: facebook/opt-350m, seq_len: 512,
                                     n_train: 128, n_val: 32, n_test: 128}}
     model: {kind: opt, params: {size: 350m, pretrained: true}}
@@ -184,6 +198,10 @@ entries:
   - name: wikitext_opt1.3b
     family: fc
     resources: large
+    # OFF for OPT at every size -- see the 125m entry. The K matrix is one
+    # square per layer in the FFN width, so it only gets worse from here:
+    # 0.5 GiB per layer at 1.3b, 3.1 GiB at 13b.
+    analyze_geometry: false
     data: {kind: wikitext, params: {tokenizer: facebook/opt-1.3b, seq_len: 512,
                                     n_train: 128, n_val: 32, n_test: null}}
     model: {kind: opt, params: {size: 1.3b, pretrained: true}}
@@ -191,6 +209,10 @@ entries:
   - name: wikitext_opt2.7b
     family: fc
     resources: large
+    # OFF for OPT at every size -- see the 125m entry. The K matrix is one
+    # square per layer in the FFN width, so it only gets worse from here:
+    # 0.5 GiB per layer at 1.3b, 3.1 GiB at 13b.
+    analyze_geometry: false
     data: {kind: wikitext, params: {tokenizer: facebook/opt-2.7b, seq_len: 512,
                                     n_train: 128, n_val: 32, n_test: null}}
     model: {kind: opt, params: {size: 2.7b, pretrained: true}}
@@ -206,6 +228,10 @@ entries:
   - name: wikitext_opt6.7b
     family: fc
     resources: large
+    # OFF for OPT at every size -- see the 125m entry. The K matrix is one
+    # square per layer in the FFN width, so it only gets worse from here:
+    # 0.5 GiB per layer at 1.3b, 3.1 GiB at 13b.
+    analyze_geometry: false
     data: {kind: wikitext, params: {tokenizer: facebook/opt-6.7b, seq_len: 512,
                                     n_train: 128, n_val: 32, n_test: null}}
     # fp16 is the dtype the checkpoint was released in, so this is a
@@ -217,6 +243,10 @@ entries:
   - name: wikitext_opt13b
     family: fc
     resources: xlarge
+    # OFF for OPT at every size -- see the 125m entry. The K matrix is one
+    # square per layer in the FFN width, so it only gets worse from here:
+    # 0.5 GiB per layer at 1.3b, 3.1 GiB at 13b.
+    analyze_geometry: false
     data: {kind: wikitext, params: {tokenizer: facebook/opt-13b, seq_len: 512,
                                     n_train: 128, n_val: 32, n_test: null}}
     # fp16 is the dtype the checkpoint was released in, so this is a

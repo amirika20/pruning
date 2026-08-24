@@ -26,6 +26,6 @@ finetune:
 seeds:
 - 0
 output_root: /n/netscratch/pehlevan_lab/Lab/akazeminia/pruning/results
-analyze_geometry: true
+analyze_geometry: false
 deterministic: true
 eval_split: test
