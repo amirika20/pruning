@@ -506,6 +506,42 @@ def _pre_activation(model: PrunableModel, layer_idx: int,
 
 # ── the pruning method ───────────────────────────────────────────────────────
 
+
+class HopePlan:
+    """One full greedy pass over a layer, cut-able at any width.
+
+    Holds ONLY the OPERATION SEQUENCE over the layer's own output units --
+    ("prune", i) or ("merge", i, j) -- and never weights, geometries or
+    kernels. Same discipline as MashPlan, for the same reason: pruning an
+    EARLIER layer removes columns from this layer's weight matrix, so every
+    orientation, kernel and parent geometry here changes, while the output units
+    a sequence is defined over do not.
+
+    The sequence is a strict prefix: nothing in the greedy loop reads n_remove
+    except its stopping condition, so running to depth K yields exactly the
+    first K operations of running deeper. That is what makes one pass serve all
+    16 widths of a sweep -- and it is the expensive part, since replaying a
+    KNOWN sequence costs one parent solve per merge instead of the H^2/2 the
+    search evaluates at every step.
+    """
+
+    __slots__ = ("ops", "n_units")
+
+    def __init__(self, ops: list[tuple], n_units: int):
+        self.ops = ops
+        self.n_units = int(n_units)
+
+    @property
+    def max_removals(self) -> int:
+        return len(self.ops)
+
+    def merges_for(self, fraction: float) -> int:
+        """Units to remove for a target fraction -- the same count
+        sweep._width_params would have put in n_remove, so a planned sweep and
+        an unplanned one land on identical widths."""
+        return max(0, min(int(round(fraction * (self.n_units - 1))),
+                          self.max_removals))
+
 @register_pruning_method("hope")
 class HOPE(PruningMethod):
     """Greedy progressive encoding within one prunable layer.
@@ -534,11 +570,40 @@ class HOPE(PruningMethod):
 
     def select(self, model: PrunableModel, layer_idx: int,
                ctx: PruneContext) -> PruneDecision:
+        return self._greedy(model, layer_idx, ctx, self.n_remove)[0]
+
+    def plan(self, model: PrunableModel, layer_idx: int,
+             ctx: PruneContext) -> HopePlan:
+        """Run the greedy ONCE, all the way down, and keep the op sequence.
+
+        Cutting it afterwards is free, which is what lets one pass serve every
+        width of a sweep instead of redoing the O(H^2) search 16 times.
+        """
+        H = model.prunable_layer(layer_idx).weight.shape[0]
+        _, ops = self._greedy(model, layer_idx, ctx, H - 1)
+        return HopePlan(ops, H)
+
+    def emit_at(self, model: PrunableModel, layer_idx: int, plan: HopePlan,
+                n_remove: int, ctx: PruneContext) -> PruneDecision:
+        """Replay the first `n_remove` planned operations in the CURRENT model's
+        coordinates -- the sequence is cached, the geometry is not."""
+        return self._greedy(model, layer_idx, ctx, n_remove,
+                            replay=plan.ops[:max(0, n_remove)])[0]
+
+    def _greedy(self, model: PrunableModel, layer_idx: int,
+                ctx: PruneContext, n_remove: int,
+                replay: list[tuple] | None = None
+                ) -> tuple[PruneDecision, list[tuple]]:
+        """The greedy pass. Searches for the cheapest op at each step, or -- given
+        `replay` -- applies a recorded sequence and skips the search entirely.
+
+        Returns the decision and the op sequence actually applied.
+        """
         lay = build_layer(model, layer_idx, ctx, self.exact_kernel)
         H = lay.W_eff.shape[0]
-        n_remove = min(self.n_remove, H - 1)
+        n_remove = min(n_remove, H - 1)
         if n_remove <= 0:
-            return PruneDecision(remove=[])
+            return PruneDecision(remove=[]), []
 
         can_merge = (self.allow_merge
                      and isinstance(model.prunable_layer(layer_idx), nn.Linear)
@@ -573,7 +638,9 @@ class HOPE(PruningMethod):
             P_a.append(float(g["a"])); P_b.append(float(g["b"]))
             stale.append(False)
 
-        if can_merge:
+        # The pair cache exists only to serve the SEARCH. A replay knows which
+        # pair it wants, so it never builds one -- that is the whole saving.
+        if can_merge and replay is None:
             act0 = np.flatnonzero(active)
             for ai in range(len(act0)):
                 for aj in range(ai + 1, len(act0)):
@@ -582,14 +649,34 @@ class HOPE(PruningMethod):
                     if g:
                         _remember(i0, j0, g)
 
+        ops: list[tuple] = []
         while len(removed) < n_remove and active.sum() > 1:
-            idx = np.flatnonzero(active)
-            n = len(idx)
-            j_prune = lay.prune_costs(idx)
-            best_p = int(np.argmin(j_prune))
-            best = ("prune", float(j_prune[best_p]), int(idx[best_p]), -1, {})
+            if replay is not None:
+                if len(ops) >= len(replay):
+                    break
+                step = replay[len(ops)]
+                if step[0] == "merge":
+                    i0, j0 = int(step[1]), int(step[2])
+                    # Geometry is re-derived in the CURRENT coordinates, so an
+                    # earlier layer's pruning is respected. If the pair stopped
+                    # admitting a parent here (a row's norm can collapse once its
+                    # columns are gone), drop j instead: same width, and the
+                    # alternative is silently missing the target.
+                    pr = lay.parent(i0, j0) if (active[i0] and active[j0]) else {}
+                    best = (("merge", 0.0, i0, j0, pr) if pr
+                            else ("prune", 0.0, j0, -1, {}))
+                else:
+                    best = ("prune", 0.0, int(step[1]), -1, {})
+                if best[0] == "prune" and not active[best[2]]:
+                    break
+            else:
+                idx = np.flatnonzero(active)
+                n = len(idx)
+                j_prune = lay.prune_costs(idx)
+                best_p = int(np.argmin(j_prune))
+                best = ("prune", float(j_prune[best_p]), int(idx[best_p]), -1, {})
 
-            if can_merge and P_i:
+            if can_merge and P_i and replay is None:
                 E_tot = float(lay.cap[idx].sum())
                 Ai = np.fromiter(P_i, dtype=np.intp, count=len(P_i))
                 Aj = np.fromiter(P_j, dtype=np.intp, count=len(P_j))
@@ -628,6 +715,7 @@ class HOPE(PruningMethod):
                 active[i] = False
                 removed.append(i)
                 lay.cap[i] = 0.0
+                ops.append(("prune", i))
             else:
                 i, j, p = best[2], best[3], best[4]
                 lay.install_parent(i, j, p)
@@ -641,17 +729,19 @@ class HOPE(PruningMethod):
                 for t, (pi, pj) in enumerate(zip(P_i, P_j)):
                     if pi in (i, j) or pj in (i, j):
                         stale[t] = True
-                for other in np.flatnonzero(active):
-                    o = int(other)
-                    if o in (i, j):
-                        continue
-                    g = lay.parent_geometry(min(i, o), max(i, o))
-                    if g:
-                        _remember(min(i, o), max(i, o), g)
+                if replay is None:
+                    for other in np.flatnonzero(active):
+                        o = int(other)
+                        if o in (i, j):
+                            continue
+                        g = lay.parent_geometry(min(i, o), max(i, o))
+                        if g:
+                            _remember(min(i, o), max(i, o), g)
                 active[j] = False
                 removed.append(j)
                 lay.cap[j] = 0.0
                 touched = True
+                ops.append(("merge", i, j))
 
         dec = PruneDecision(remove=sorted(removed))
         if touched:
@@ -662,7 +752,7 @@ class HOPE(PruningMethod):
             W_out = lay.W_out.copy()
             W_out[np.array(sorted(removed), dtype=int)] = 0.0
             dec.new_outgoing = torch.from_numpy(W_out).to(lin.weight.dtype)
-        return dec
+        return dec, ops
 
 
 # ── self-tests ───────────────────────────────────────────────────────────────
