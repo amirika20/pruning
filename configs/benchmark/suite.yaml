@@ -215,7 +215,12 @@ defaults:
   # Pretrained entries skip training entirely.
   training_pretrained: {epochs: 0}
   arms_tier: headline
-  analyze_geometry: true
+  # analyze_geometry is deliberately UNSET here so it falls through to
+  # "headline arms only" in the generator. The geometry and similarity batteries
+  # are exploratory and quadratic in layer width, and on the OPT-125m smoke cell
+  # they took 1136s of a 1224s seed against 9s for the width sweep that is the
+  # actual measurement. We read them for a handful of representative arms, not
+  # for all 50 of the ablation grid. Set true/false here to force either way.
   deterministic: true
   # Lab scratch: home is quota'd and 13b OPT weights alone are ~52GB.
   # The job scripts also point TORCH_HOME/HF_HOME under here, so weights

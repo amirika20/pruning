@@ -35,7 +35,7 @@ seeds:
 - 1
 - 2
 output_root: /n/netscratch/pehlevan_lab/Lab/akazeminia/pruning/results
-analyze_geometry: true
+analyze_geometry: false
 deterministic: true
 eval_split: val
 require_accuracy: 0.9

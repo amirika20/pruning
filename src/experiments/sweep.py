@@ -89,6 +89,12 @@ def _width_params(cls: type, params: dict, n_units: int, fraction: float) -> dic
     return out
 
 
+# Sequences per forward pass when scoring a language model. Logits dominate
+# (batch x seq x vocab), so this bounds evaluation memory independently of how
+# many chunks the split holds.
+LM_EVAL_BATCH = 4
+
+
 def _accuracy(model: PrunableModel, bundle: DatasetBundle,
               batch_size: int = 512, split: str = "val") -> tuple[float, float | None]:
     """Loss and accuracy on `split` ("val" or "test").
@@ -98,6 +104,13 @@ def _accuracy(model: PrunableModel, bundle: DatasetBundle,
     concerned -- grading it there overstates the dense baseline every capacity
     is measured against. Pretrained cells pass split="test".
     """
+    # BOUND THE LM BATCH. The val loader batches the whole split at once, which
+    # was fine at the 8 chunks n_val defaults to and OOMs at the ~560 of a full
+    # wikitext test split: logits are batch x seq x vocab, so 560 x 512 x 50272
+    # fp32 is a single 53.8 GiB allocation. Cap causal_lm regardless of split so
+    # memory stays a function of the model, not of how much text was asked for.
+    if bundle.task == "causal_lm":
+        batch_size = min(batch_size, LM_EVAL_BATCH)
     if split == "test":
         loader = bundle.test_loader(batch_size)
         if loader is None:

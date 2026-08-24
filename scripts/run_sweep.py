@@ -51,7 +51,7 @@ from src.analysis.geometry_shift import geometry_shift
 from src.analysis.similarity import similarity_table
 from src.config import ExperimentConfig
 from src.data import build_dataset
-from src.experiments.sweep import (format_sweep, prune_at_fraction,
+from src.experiments.sweep import (LM_EVAL_BATCH, format_sweep, prune_at_fraction,
                                    sweep_report, sweep_widths)
 from src.models import build_model
 from src.reproducibility import run_fingerprint, seed_everything
@@ -60,10 +60,15 @@ from src.training.trainer import evaluate, train
 
 def _accuracy_of(model, bundle, device, split="val"):
     """(loss, accuracy) on `split` -- the same split the sweep measures on."""
+    # Same LM batch cap as the sweep -- see sweep.LM_EVAL_BATCH.
     if split == "test":
-        loader = bundle.test_loader(1024)
+        bs = LM_EVAL_BATCH if bundle.task == "causal_lm" else 1024
+        loader = bundle.test_loader(bs)
         if loader is None:
             raise ValueError("eval_split='test' but this dataset has no test split")
+    elif bundle.task == "causal_lm":
+        loader = torch.utils.data.DataLoader(bundle.val_ds,
+                                             batch_size=LM_EVAL_BATCH, shuffle=False)
     else:
         _, loader = bundle.loaders(batch_size=None)
     return evaluate(model, loader, bundle.task)

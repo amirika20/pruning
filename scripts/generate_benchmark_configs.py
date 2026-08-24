@@ -119,7 +119,17 @@ def build_config(entry: dict, arm: dict, defaults: dict,
         "finetune": dict(defaults.get("finetune") or {"epochs": 0}),
         "seeds": list(seeds),
         "output_root": defaults.get("output_root", "outputs/benchmark"),
-        "analyze_geometry": bool(defaults.get("analyze_geometry", True)),
+        # HEADLINE ARMS ONLY. The geometry and similarity batteries are
+        # exploratory and quadratic in layer width -- the K matrix alone is
+        # 3072x3072 per layer on OPT-125m -- and they dominated the smoke test
+        # completely: 1136s of a 1224s seed, against 9s for the width sweep that
+        # is the actual measurement. Running them on all 50 ablation arms buys
+        # nothing, since what we read is a few representative arms. A suite entry
+        # or the defaults block can still force either way.
+        "analyze_geometry": bool(
+            entry.get("analyze_geometry",
+                      defaults.get("analyze_geometry",
+                                  arm.get("tier") == "headline"))),
         "deterministic": bool(defaults.get("deterministic", True)),
         # A downloaded checkpoint saw the whole official train split, so the val
         # slice carved from it is training data to that model. Grade it on test.
