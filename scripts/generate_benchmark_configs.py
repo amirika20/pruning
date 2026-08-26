@@ -58,6 +58,7 @@ def expand_arms(arms_spec: dict) -> list[dict]:
         keys = sorted(axes)
         fixed = dict(g.get("fixed") or {})
         fc_when = g.get("requires_fc_when") or {}
+        nobn_when = g.get("requires_nobn_when") or {}
         for combo in itertools.product(*(axes[k] for k in keys)):
             params = dict(fixed)
             params.update(dict(zip(keys, combo)))
@@ -67,8 +68,11 @@ def expand_arms(arms_spec: dict) -> list[dict]:
             for pk, bad in fc_when.items():
                 if params.get(pk) in bad:
                     requires = "fc"
+            needs_nobn = any(params.get(pk) in bad
+                             for pk, bad in nobn_when.items())
             out.append({"name": f"{g['prefix']}_{tag}", "kind": g["kind"],
-                        "params": params, "requires": requires})
+                        "params": params, "requires": requires,
+                        "requires_nobn": needs_nobn})
 
     headline = set(arms_spec.get("headline") or [])
     seen: dict[str, dict] = {}
@@ -203,6 +207,10 @@ def main() -> None:
                 # hope_prune_only stays: allow_merge=false enumerates nothing.
                 continue
             fam = entry.get("family")
+            if arm.get("requires_nobn") and entry.get("bn"):
+                # The layer's paired BatchNorm makes a synthesized hyperplane
+                # unwritable -- see requires_nobn_when in arms.yaml.
+                continue
             if arm.get("requires") == "fc" and fam != "fc":
                 # `mixed` (LeNet: conv slots AND fc slots) is treated like conv:
                 # an fc-only arm would raise on the conv slots, and prune_model

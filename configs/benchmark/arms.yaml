@@ -169,6 +169,14 @@ grids:
     # closed-form Grams are the FC-only half of the repair axis
     requires_fc_when:
       repair: [projection, kernel]
+    # dictionary=merge synthesizes a hyperplane whose parameters are the
+    # BN-FOLDED ones, so writing it back while the paired BatchNorm still
+    # applies would double-count the normalization -- mash raises
+    # NotImplementedError and points at medoid, which keeps original filters and
+    # their BN slots. Generating these on a BN entry only queues cells that
+    # cannot run: 16 of them failed that way on the CIFAR ResNets.
+    requires_nobn_when:
+      dictionary: [merge]
 
   # the bias-compensation toggle, on the two repairs where it can matter
   # (a global solve already zero-means its residual, so it is ~free there)
@@ -179,6 +187,8 @@ grids:
       score: [cylinder, delta_f]
       dictionary: [merge]
       repair: [sum, empirical]
+    requires_nobn_when:
+      dictionary: [merge]
 
   # the gauge-correction toggle: emitting eta_C * sum(v) makes the merged unit
   # the optimal affine surrogate; the unscaled sum overshoots its slope by
@@ -190,6 +200,8 @@ grids:
       score: [cylinder, delta_f]
       dictionary: [merge]
       repair: [sum]
+    requires_nobn_when:
+      dictionary: [merge]
 
   # cylinder radius: sup-norm (the operating choice) vs the mean-square radius
   # the Ward identity is nominally stated at
@@ -199,3 +211,5 @@ grids:
     axes:
       dictionary: [merge]
       repair: [sum, empirical]
+    requires_nobn_when:
+      dictionary: [merge]

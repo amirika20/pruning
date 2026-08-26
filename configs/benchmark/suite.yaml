@@ -100,6 +100,7 @@ entries:
 
   # ── CIFAR-10: downloaded (chenyaofo/pytorch-cifar-models via torch.hub) ────
   - name: cifar10_resnet20
+    bn: true            # prunable convs are BN-paired: no merge dictionary
     arms_tier: all
     family: conv
     resources: medium
@@ -107,6 +108,7 @@ entries:
     model: {kind: resnet_cifar, params: {depth: 20, pretrained: true}}
 
   - name: cifar10_resnet56
+    bn: true            # prunable convs are BN-paired: no merge dictionary
     family: conv
     resources: medium
     data: {kind: cifar10, params: {n_samples: 10000, train_ratio: 0.8, n_test: 10000}}
@@ -116,6 +118,7 @@ entries:
   # Point data.params.root at the cluster's ImageNet; n_test drives the accuracy
   # estimate, and the -1pt tolerance needs >= 2000 val images to be meaningful.
   - name: imagenet_resnet18
+    bn: true            # prunable convs are BN-paired: no merge dictionary
     family: conv
     resources: large
     data: {kind: imagenet, params: {root: /n/holylfs06/LABS/kempner_shared/Everyone/testbed/vision/imagenet_1k, n_samples: 20000,
@@ -123,6 +126,7 @@ entries:
     model: {kind: resnet_imagenet, params: {depth: 18, pretrained: true}}
 
   - name: imagenet_resnet50
+    bn: true            # prunable convs are BN-paired: no merge dictionary
     family: conv
     resources: large
     data: {kind: imagenet, params: {root: /n/holylfs06/LABS/kempner_shared/Everyone/testbed/vision/imagenet_1k, n_samples: 20000,
@@ -130,6 +134,7 @@ entries:
     model: {kind: resnet_imagenet, params: {depth: 50, pretrained: true}}
 
   - name: imagenet_mobilenetv2
+    bn: true            # prunable convs are BN-paired: no merge dictionary
     family: conv
     resources: large
     data: {kind: imagenet, params: {root: /n/holylfs06/LABS/kempner_shared/Everyone/testbed/vision/imagenet_1k, n_samples: 20000,
