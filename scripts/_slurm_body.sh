@@ -39,7 +39,14 @@ export TORCH_HOME="$PRUNING_SCRATCH/cache/torch"          # torchvision + torch.
 export HF_HOME="$PRUNING_SCRATCH/cache/huggingface"       # OPT weights + tokenizers
 export HF_DATASETS_CACHE="$PRUNING_SCRATCH/cache/huggingface/datasets"
 RESULTS_ROOT="${RESULTS_ROOT:-$PRUNING_SCRATCH/results}"
-mkdir -p "$TORCH_HOME" "$HF_HOME" "$RESULTS_ROOT"
+if ! mkdir -p "$TORCH_HOME" "$HF_HOME" "$RESULTS_ROOT" 2>/dev/null; then
+    echo "FATAL: cannot create directories under PRUNING_SCRATCH=$PRUNING_SCRATCH" >&2
+    echo "  $(mkdir -p "$RESULTS_ROOT" 2>&1 | head -1)" >&2
+    echo "  Nothing can be written, so the manifest is not started. Check the lab" >&2
+    echo "  scratch mount from this node (ls -ld $(dirname "$PRUNING_SCRATCH")), or" >&2
+    echo "  set PRUNING_SCRATCH to a writable path." >&2
+    exit 1
+fi
 
 # The attempt number belongs in the log name. Without it a requeued attempt
 # reopens the same path and OVERWRITES its predecessor, so the first attempt's
@@ -54,9 +61,33 @@ STAMP="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-local}}${SLURM_ARRAY_TASK_ID:+_$SLU
 mv -f "logs/slurm_${SLURM_JOB_ID:-}.log" \
       "logs/$(basename "${TARGET%.*}")_${STAMP}.log" 2>/dev/null || true
 
-module load python
-module load cuda/12.9.1-fasrc01
-mamba activate ML
+# `module` and `mamba` failing used to be survivable-looking: each printed its
+# own error, the script continued, and the first thing to actually die was the
+# GPU probe -- with "python: command not found", which the probe then reported as
+# GPU UNUSABLE and wrote a perfectly healthy node into bad_nodes.txt. Diagnose
+# the environment here instead, where the message can name the real cause.
+module load python 2>/dev/null || echo "note: module load python failed" >&2
+module load cuda/12.9.1-fasrc01 2>/dev/null || echo "note: module load cuda failed" >&2
+if command -v mamba >/dev/null 2>&1; then
+    mamba activate ML || echo "note: mamba activate ML failed" >&2
+elif command -v conda >/dev/null 2>&1; then
+    echo "note: mamba absent, trying conda" >&2
+    conda activate ML || echo "note: conda activate ML failed" >&2
+else
+    echo "note: neither mamba nor conda on PATH" >&2
+fi
+
+if ! command -v python >/dev/null 2>&1; then
+    echo "FATAL: no python on PATH after environment setup on $(hostname -s)." >&2
+    echo "  This is an ENVIRONMENT failure, not a GPU or code failure -- the" >&2
+    echo "  module system or the conda env did not load. Common cause: the node" >&2
+    echo "  is missing the lmod install the login node has" >&2
+    echo "  (/n/sw/helmod-rocky8/apps/lmod/...), so `module` and `mamba` are" >&2
+    echo "  both unavailable." >&2
+    echo "  Check: srun --pty -p ${SLURM_JOB_PARTITION:-kempner} bash -c 'module load python; which python'" >&2
+    echo "  Do NOT add this node to bad_nodes.txt -- its GPU was never tested." >&2
+    exit 78
+fi
 
 echo "host:     $(hostname)"
 echo "python:   $(which python) ($(python --version 2>&1))"
@@ -106,7 +137,9 @@ if [[ "$gpu_ok" -ne 1 ]]; then
     touch logs/bad_nodes.txt
     grep -qxF "$BAD" logs/bad_nodes.txt || echo "$BAD" >> logs/bad_nodes.txt
     echo "recorded in logs/bad_nodes.txt -- resubmit excluding it:" >&2
-    echo "    sbatch --exclude=$(paste -sd, logs/bad_nodes.txt) <script> $TARGET" >&2
+    # sort -u at print time: concurrent array tasks append without locking, so the
+    # grep guard above loses races and the list can hold a host twice.
+    echo "    sbatch --exclude=$(sort -u logs/bad_nodes.txt | paste -sd,) <script> $TARGET" >&2
     echo "and report $BAD to FASRC: a GPU held by a stuck process" >&2
     exit 1
 fi
