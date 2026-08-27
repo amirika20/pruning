@@ -1,0 +1,2 @@
+configs/benchmark/generated/imagenet_resnet18/random.yaml
+configs/benchmark/generated/imagenet_vit_b16/mash_merge_kernel_delta_f.yaml

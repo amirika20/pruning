@@ -149,6 +149,11 @@ entries:
     # BN-paired conv makes can_merge false and HOPE degrades to a cheap
     # prune-only pass (~2s).
     exclude_arms: [hope, hope_exact]
+    # OFF at this width, exactly as for OPT: ViT-B/16's MLP stack is 12 layers
+    # of 3072, the SAME shape as OPT-125m, where the battery measured 1136s per
+    # seed -- 11 of this entry's 22 GPU-hours. It stays ON for the ResNets and
+    # MobileNetV2, whose widths (<=960) make it cost 21-148s per seed.
+    analyze_geometry: false
     family: fc
     resources: large
     data: {kind: imagenet, params: {root: /n/holylfs06/LABS/kempner_shared/Everyone/testbed/vision/imagenet_1k, n_samples: 20000,
