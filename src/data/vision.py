@@ -9,10 +9,53 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import hashlib
+import logging
+import os
 import torch
 from torch.utils.data import TensorDataset
 
 from src.data.registry import DatasetBundle, register_dataset
+
+
+def _dataset_cache_dir() -> Path:
+    """Where materialized dataset tensors live. Shares the scratch tree the job
+    scripts already export, so a cache written by one cell is visible to all."""
+    base = os.environ.get("PRUNING_DATA_CACHE")
+    if not base:
+        scratch = os.environ.get("PRUNING_SCRATCH")
+        base = (f"{scratch}/cache/datasets" if scratch
+                else str(Path.home() / ".cache" / "pruning-datasets"))
+    return Path(base).expanduser()
+
+
+def _dataset_cache_key(kind: str, **params) -> str:
+    blob = kind + "|" + "|".join(f"{k}={params[k]}" for k in sorted(params))
+    return f"{kind}_{hashlib.sha256(blob.encode()).hexdigest()[:16]}.pt"
+
+
+def _load_dataset_cache(key: str):
+    p = _dataset_cache_dir() / key
+    if not p.is_file():
+        return None
+    try:
+        return torch.load(p, map_location="cpu", weights_only=False)
+    except Exception as exc:                       # noqa: BLE001
+        # A truncated cache (a job killed mid-write) must not poison every later
+        # run -- fall through and rebuild.
+        logging.warning(f"ignoring unreadable dataset cache {p}: {exc}")
+        return None
+
+
+def _save_dataset_cache(key: str, payload: dict) -> None:
+    d = _dataset_cache_dir()
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        tmp = d / (key + f".tmp{os.getpid()}")
+        torch.save(payload, tmp)
+        tmp.replace(d / key)                        # atomic: concurrent tasks race safely
+    except OSError as exc:
+        logging.warning(f"could not write dataset cache to {d}: {exc}")
 
 
 def _subset_as_tensors(dataset, indices: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -163,31 +206,56 @@ def imagenet(
             "be downloaded automatically"
         )
 
-    tfm = transforms.Compose([
+    # DECODE ONCE, NOT 108 TIMES. Materializing the subset means JPEG-decoding
+    # every selected image, and the smoke run measured 1230s of a 1330s seed
+    # doing exactly that -- 92% of the wall clock. Nothing about it depends on
+    # the pruning arm, so all 36 ImageNet cells and all 3 seeds were repeating
+    # the same work: ~37 GPU-hours of decoding across the tier.
+    #
+    # Cached as uint8 BEFORE normalization: 150 KB per 224x224 example against
+    # 602 KB as float32, and x.float()/255 then Normalize is bit-identical to
+    # ToTensor + Normalize, so the cache changes nothing but the clock.
+    MEAN = (0.485, 0.456, 0.406)
+    STD = (0.229, 0.224, 0.225)
+    raw_tfm = transforms.Compose([
         transforms.Resize(int(image_size * 256 / 224)),
         transforms.CenterCrop(image_size),
-        transforms.ToTensor(),
-        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        transforms.PILToTensor(),                       # uint8 [C, H, W]
     ])
-    full_train = datasets.ImageFolder(train_dir, transform=tfm)
-    full_test = datasets.ImageFolder(val_dir, transform=tfm)
+    key = _dataset_cache_key("imagenet", root=str(root_path), n_samples=n_samples,
+                             n_test=n_test, image_size=image_size, seed=data_seed)
+    cached = _load_dataset_cache(key)
+    if cached is None:
+        full_train = datasets.ImageFolder(train_dir, transform=raw_tfm)
+        full_test = datasets.ImageFolder(val_dir, transform=raw_tfm)
+        rng = torch.Generator().manual_seed(data_seed)
+        trainval_idx = torch.randperm(len(full_train), generator=rng)[:n_samples]
+        test_idx = torch.randperm(len(full_test), generator=rng)[:n_test]
+        xa, ya = _subset_as_tensors(full_train, trainval_idx)
+        xb, yb = _subset_as_tensors(full_test, test_idx)
+        cached = {"x_trainval": xa, "y_trainval": ya, "x_test": xb, "y_test": yb,
+                  "classes": list(full_train.classes)}
+        _save_dataset_cache(key, cached)
+    classes = cached["classes"]
 
-    rng = torch.Generator().manual_seed(data_seed)
+    def _norm(u8: torch.Tensor) -> torch.Tensor:
+        x = u8.float().div_(255.0)
+        m = torch.tensor(MEAN).view(1, -1, 1, 1)
+        s = torch.tensor(STD).view(1, -1, 1, 1)
+        return x.sub_(m).div_(s)
+
     n_train = int(n_samples * train_ratio)
-    trainval_idx = torch.randperm(len(full_train), generator=rng)[:n_samples]
-    test_idx = torch.randperm(len(full_test), generator=rng)[:n_test]
-
-    x_trainval, y_trainval = _subset_as_tensors(full_train, trainval_idx)
-    x_test, y_test = _subset_as_tensors(full_test, test_idx)
+    x_trainval, y_trainval = _norm(cached["x_trainval"]), cached["y_trainval"]
+    x_test, y_test = _norm(cached["x_test"]), cached["y_test"]
 
     return DatasetBundle(
         train_ds=TensorDataset(x_trainval[:n_train], y_trainval[:n_train]),
         val_ds=TensorDataset(x_trainval[n_train:], y_trainval[n_train:]),
         test_ds=TensorDataset(x_test, y_test),
         input_shape=tuple(x_trainval.shape[1:]),
-        output_dim=len(full_train.classes),
+        output_dim=len(classes),
         task="multiclass",
         # Folder names, i.e. WNIDs for ImageNet-style trees -- lets pretrained
         # builders map classes back to ImageNet-1k indices (see src/models/resnet.py).
-        extra={"class_names": list(full_train.classes)},
+        extra={"class_names": list(classes)},
     )
