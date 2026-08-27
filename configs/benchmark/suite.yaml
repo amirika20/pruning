@@ -142,6 +142,13 @@ entries:
     model: {kind: mobilenet_v2, params: {width_mult: 1.0, pretrained: true}}
 
   - name: imagenet_vit_b16
+    # HOPE's merge search enumerates every pair: measured H^2.28, so ViT's
+    # 3072-wide MLP costs ~1550s per layer, ~5.2h per seed, ~15 GPU-h for this
+    # one arm -- with a 4.7M-entry pair cache per layer. Not worth it for one
+    # baseline column. It stays on the ResNets and MobileNetV2, where a
+    # BN-paired conv makes can_merge false and HOPE degrades to a cheap
+    # prune-only pass (~2s).
+    exclude_arms: [hope, hope_exact]
     family: fc
     resources: large
     data: {kind: imagenet, params: {root: /n/holylfs06/LABS/kempner_shared/Everyone/testbed/vision/imagenet_1k, n_samples: 20000,
