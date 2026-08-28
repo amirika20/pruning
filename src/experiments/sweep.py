@@ -177,6 +177,7 @@ def sweep_widths(
         logging.info(f"  [{kind}] planned {len(plans)} layer(s) in "
                      f"{plan_seconds:.2f}s -- reused at every width")
 
+    removals: dict[float, dict[int, list[int]]] = {}
     for f in fractions:
         t0 = time.perf_counter()
         # A DEEP COPY PER WIDTH, for the same reason prune_model takes one: the
@@ -203,6 +204,15 @@ def sweep_widths(
             current, selected, _ = apply_decision(current, li, decision)
             if selected:
                 current = current.prune_layer(li, sorted(selected))
+            # WHICH units went, recorded as we go. The sweep already knows this
+            # and used to discard it, so answering "do two methods remove the
+            # same neurons?" meant re-running every arm. It is free here.
+            #
+            # Indices are LOCAL to the layer as it stood at this width: pruning
+            # layer li-1 renumbers nothing in li, but an earlier width's removals
+            # are not carried over, so each fraction is a fresh, independent
+            # prune of the dense model and its indices refer to the dense layer.
+            removals.setdefault(float(f), {})[li] = sorted(int(i) for i in selected)
         solve_seconds = time.perf_counter() - t0
         widths = [current.prunable_layer(i).weight.shape[0]
                   for i in range(current.n_prunable_layers())]
@@ -218,6 +228,9 @@ def sweep_widths(
     df["plan_seconds"] = plan_seconds
     df["total_seconds"] = plan_seconds + df.solve_seconds.sum()
     df["method"] = kind
+    # attrs rather than a column: this is per (fraction, layer), not per row, and
+    # embedding JSON in a cell would make curve.csv unreadable.
+    df.attrs["removals"] = removals
     return df
 
 

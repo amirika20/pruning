@@ -201,6 +201,14 @@ def main() -> None:
         out = root / f"seed_{seed}"
         out.mkdir(parents=True, exist_ok=True)
         curve.to_csv(out / "curve.csv", index=False)
+        # Which units each width removed, so arms can be compared after the fact
+        # (src.analysis.pruning_detail.overlap_table) without re-running them.
+        rem = curve.attrs.get("removals") or {}
+        if rem:
+            (out / "removals.json").write_text(json.dumps(
+                {"cell": config.name, "arm": method.kind, "seed": seed,
+                 "widths": widths,
+                 "by_fraction": {f"{k:.6f}": v for k, v in sorted(rem.items())}}))
         (out / "report.json").write_text(json.dumps(rep, indent=2, default=str))
         logging.info("\n" + format_sweep({f"{config.name} s{seed}": rep}))
 
