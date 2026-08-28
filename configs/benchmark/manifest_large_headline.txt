@@ -5,8 +5,6 @@ configs/benchmark/generated/imagenet_resnet18/saturated_dead_margin.yaml
 configs/benchmark/generated/imagenet_resnet18/mash_certified.yaml
 configs/benchmark/generated/imagenet_resnet18/osscar.yaml
 configs/benchmark/generated/imagenet_resnet18/hope.yaml
-configs/benchmark/generated/imagenet_resnet18/mash_merge_sum_cylinder.yaml
-configs/benchmark/generated/imagenet_resnet18/mash_merge_empirical_delta_f.yaml
 configs/benchmark/generated/imagenet_resnet18/mash_medoid_empirical_delta_f.yaml
 configs/benchmark/generated/imagenet_resnet50/random.yaml
 configs/benchmark/generated/imagenet_resnet50/magnitude_mass.yaml
@@ -15,8 +13,6 @@ configs/benchmark/generated/imagenet_resnet50/saturated_dead_margin.yaml
 configs/benchmark/generated/imagenet_resnet50/mash_certified.yaml
 configs/benchmark/generated/imagenet_resnet50/osscar.yaml
 configs/benchmark/generated/imagenet_resnet50/hope.yaml
-configs/benchmark/generated/imagenet_resnet50/mash_merge_sum_cylinder.yaml
-configs/benchmark/generated/imagenet_resnet50/mash_merge_empirical_delta_f.yaml
 configs/benchmark/generated/imagenet_resnet50/mash_medoid_empirical_delta_f.yaml
 configs/benchmark/generated/imagenet_mobilenetv2/random.yaml
 configs/benchmark/generated/imagenet_mobilenetv2/magnitude_mass.yaml
@@ -25,8 +21,6 @@ configs/benchmark/generated/imagenet_mobilenetv2/saturated_dead_margin.yaml
 configs/benchmark/generated/imagenet_mobilenetv2/mash_certified.yaml
 configs/benchmark/generated/imagenet_mobilenetv2/osscar.yaml
 configs/benchmark/generated/imagenet_mobilenetv2/hope.yaml
-configs/benchmark/generated/imagenet_mobilenetv2/mash_merge_sum_cylinder.yaml
-configs/benchmark/generated/imagenet_mobilenetv2/mash_merge_empirical_delta_f.yaml
 configs/benchmark/generated/imagenet_mobilenetv2/mash_medoid_empirical_delta_f.yaml
 configs/benchmark/generated/imagenet_vit_b16/random.yaml
 configs/benchmark/generated/imagenet_vit_b16/magnitude_mass.yaml
@@ -34,7 +28,6 @@ configs/benchmark/generated/imagenet_vit_b16/saturated_dead_empirical.yaml
 configs/benchmark/generated/imagenet_vit_b16/saturated_dead_margin.yaml
 configs/benchmark/generated/imagenet_vit_b16/mash_certified.yaml
 configs/benchmark/generated/imagenet_vit_b16/osscar.yaml
-configs/benchmark/generated/imagenet_vit_b16/hope.yaml
 configs/benchmark/generated/imagenet_vit_b16/data_free_merge.yaml
 configs/benchmark/generated/imagenet_vit_b16/leo_pp.yaml
 configs/benchmark/generated/imagenet_vit_b16/mash_merge_sum_cylinder.yaml
