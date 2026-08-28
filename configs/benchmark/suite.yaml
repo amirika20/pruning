@@ -142,6 +142,13 @@ entries:
     model: {kind: mobilenet_v2, params: {width_mult: 1.0, pretrained: true}}
 
   - name: imagenet_vit_b16
+    # hope excluded: its merge search is O(H^2) pair solves and ViT's MLP is
+    # 3072 wide with no BN, so unlike the ResNets it does NOT degrade to the
+    # cheap prune-only path. The H^2.28 fit puts one layer at ~1582s, so 12
+    # layers is ~5.3h per seed -- 16 GPU-h for a single baseline cell -- and the
+    # merge path has never run above width 800. HOPE is still measured on the
+    # other six models.
+    exclude_arms: [hope]
     # HOPE's merge search enumerates every pair: measured H^2.28, so ViT's
     # 3072-wide MLP costs ~1550s per layer, ~5.2h per seed, ~15 GPU-h for this
     # one arm -- with a 4.7M-entry pair cache per layer. Not worth it for one
