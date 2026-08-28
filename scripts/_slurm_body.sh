@@ -61,6 +61,26 @@ STAMP="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-local}}${SLURM_ARRAY_TASK_ID:+_$SLU
 mv -f "logs/slurm_${SLURM_JOB_ID:-}.log" \
       "logs/$(basename "${TARGET%.*}")_${STAMP}.log" 2>/dev/null || true
 
+# RE-INITIALISE LMOD RATHER THAN TRUSTING THE INHERITED FUNCTION. `module` is a
+# shell function lmod defines, and sbatch's default --export=ALL ships the
+# SUBMITTING shell's copy to the compute node. Submitting from a VS Code remote
+# terminal sent one pointing at /n/sw/helmod-rocky8/..., which the nodes no
+# longer have, so every task failed identically with
+#   environment: line 17: /n/sw/helmod-rocky8/.../lmod: No such file or directory
+# ("environment" is what bash calls the source of an exported function). Drop a
+# stale definition and source the node's own init instead.
+if [[ -n "${LMOD_CMD:-}" && ! -x "${LMOD_CMD}" ]]; then
+    echo "note: inherited LMOD_CMD=$LMOD_CMD is not executable here; re-initialising" >&2
+    unset -f module 2>/dev/null || true
+    unset LMOD_CMD MODULESHOME LMOD_PKG 2>/dev/null || true
+fi
+if ! command -v module >/dev/null 2>&1 && [[ -z "${LMOD_CMD:-}" ]]; then
+    for init in /etc/profile.d/lmod.sh /etc/profile.d/modules.sh \
+                /usr/share/lmod/lmod/init/bash /n/sw/helmod-rocky9/apps/lmod/lmod/init/bash; do
+        [[ -r "$init" ]] && source "$init" && break
+    done
+fi
+
 # `module` and `mamba` failing used to be survivable-looking: each printed its
 # own error, the script continued, and the first thing to actually die was the
 # GPU probe -- with "python: command not found", which the probe then reported as
