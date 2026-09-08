@@ -12,7 +12,10 @@ w != 0 is written canonically as h(x) = alpha * sigma(u^T x - rho) with
 
 The network is unchanged by (w, b, c) -> (t w, t b, c / t) for t > 0, so alpha
 is not identifiable alone: the gauge-invariant data are the geometric code
-q = [u; rho] and the mass a. Every score here depends on (q, a) only.
+q = [u; rho] and the effective outgoing vector v -- hence the mass a = ||v||.
+`cylinder` and `delta_f` depend on (q, a) only; `exact_damage` also reads the
+outgoing Gram <v_k, v_l>, so it sees whether two fan-outs reinforce or cancel
+rather than only how heavy they are. All three are gauge invariant, since v is.
 
 MERGING is addition of mass-weighted covectors. A cluster C carries the triple
 
@@ -29,7 +32,7 @@ the merged unit realize the mass-weighted MEAN pre-activation -- the optimal
 affine surrogate. Without it the plain sum w_C is emitted, which overshoots the
 slope by 1/eta_C; that variant is kept because the recorded studies used it.
 
-SCORES (`score=`), all in mass-weighted Ward form  A_k A_l / (A_k + A_l) * d^2:
+SCORES (`score=`):
 
     cylinder      d^2 on the covector cylinder, [radius * u ; u^T x0 - rho],
                   evaluated at cluster CENTROIDS. Pre-ReLU and domain-only:
@@ -42,6 +45,17 @@ SCORES (`score=`), all in mass-weighted Ward form  A_k A_l / (A_k + A_l) * d^2:
                   delta_f -- kept for ablation, since the two agree closely in
                   practice (the fan-out term contributes very little).
 
+`cylinder` and `delta_f` are mass-weighted WARD costs: A_k A_l / (A_k + A_l)
+times a squared distance between cluster codes. `exact_damage` is not -- it is
+an output-space energy carrying no Ward weight and satisfying no Ward identity,
+so its pass is Ward-SHAPED, not Ward. It is written in the gain the merge is
+actually EMITTED with, psi_C = eta_C phi_C = sigma((g_C^T x - r_C) / A_C) under
+`gauge_correct` and the unit-gain phi_C without it, so score and emission always
+refer to the same function. Scoring phi_C while emitting eta_C phi_C -- what
+this did until the gauge audit -- misprices any merge whose members are not
+near-parallel (28% on random units, and the good pairs where eta ~ 1 are
+exactly the ones it got right); `gauge_correct=False` reproduces those numbers.
+
 `cylinder` is pre-ReLU by construction, and no metric on the boundary geometry
 can know what the ReLU clips -- that needs the measure. This is why the
 domain-only tier is a CERTIFICATE tier rather than a capacity tier.
@@ -49,7 +63,11 @@ domain-only tier is a CERTIFICATE tier rather than a capacity tier.
 DICTIONARY (`dictionary=`): `merge` emits the new mass-weighted hyperplane;
 `medoid` keeps each cluster's heaviest ORIGINAL unit and lets the repair absorb
 the rest. Only `merge` synthesizes a hyperplane, so only `merge` requires that
-the layer have no paired BatchNorm (see `select`).
+the layer have no paired BatchNorm (see `select`). The engine takes the
+dictionary too, because the CERTIFICATE has to be written against the atom the
+cluster actually emits: a bound on the distance to the centroid says nothing
+about a medoid that was emitted in its place (it is violated by 1.5x on a
+three-unit fan whose heaviest member sits at the edge).
 
 REPAIR (`repair=`) of the surviving consumer columns:
 
@@ -270,9 +288,12 @@ class MashEngine:
                  x0: np.ndarray | None = None, radius: float | None = None,
                  mu: np.ndarray | None = None, Sigma: np.ndarray | None = None,
                  gauge_correct: bool = True, row_cache: bool = True, measure: str = "gaussian",
-                 Z: np.ndarray | None = None):
+                 Z: np.ndarray | None = None, dictionary: str = "merge"):
         if score not in SCORES:
             raise ValueError(f"score must be one of {SCORES}, got {score!r}")
+        if dictionary not in DICTIONARIES:
+            raise ValueError(f"dictionary must be one of {DICTIONARIES}, "
+                             f"got {dictionary!r}")
         if measure not in ("gaussian", "empirical"):
             raise ValueError("measure must be 'gaussian' or 'empirical'")
         if score == "cylinder" and (x0 is None or radius is None):
@@ -285,6 +306,16 @@ class MashEngine:
         self.orig = units
         self.score = score
         self.gauge_correct = gauge_correct
+        # The dictionary is not used to SCORE anything -- it decides which atom
+        # the certificate is written against, since that is the one `realize`
+        # will emit.
+        self.dictionary = dictionary
+        # Which gain a cluster's post-ReLU response is expressed in.
+        # `exact_damage` claims to be the damage of the emission, so it has to
+        # follow the emission: psi_C = eta_C phi_C under gauge correction.
+        # `delta_f` is a unit-gain proxy by definition and stays 'realized'.
+        self._resp_kind = ("centroid" if score == "exact_damage" and gauge_correct
+                           else "realized")
         a = units.mass
         H = len(a)
         self.n_orig = H
@@ -360,10 +391,16 @@ class MashEngine:
     def _norms(self, idx: np.ndarray) -> np.ndarray:
         return np.linalg.norm(self.g[idx], axis=1)
 
+    def _resp_den(self, idx: np.ndarray) -> np.ndarray:
+        """Denominator of the pre-activation the responses are written in:
+        ||g_C|| for the unit-gain phi_C, A_C for the emitted psi_C."""
+        return self.A[idx] if self._resp_kind == "centroid" else self._norms(idx)
+
     def _responses(self, idx: np.ndarray) -> np.ndarray:
-        """Post-ReLU unit-gain responses of clusters `idx` on the calibration
-        rows, [len(idx), N]. Only defined for measure='empirical'."""
-        n = self._norms(idx)
+        """Post-ReLU responses of clusters `idx` on the calibration rows,
+        [len(idx), N], in the gain `_resp_kind` selects. Only defined for
+        measure='empirical'."""
+        n = self._resp_den(idx)
         safe = np.where(n > TINY, n, 1.0)
         t = (self._Zg[idx] - self.r[idx][:, None]) / safe[:, None]
         return np.maximum(np.where((n > TINY)[:, None], t, 0.0), 0.0)
@@ -385,8 +422,23 @@ class MashEngine:
         off = np.where(den > TINY, (self.g[idx] @ self.x0 - self.r[idx]) / safe, 0.0)
         return u, off
 
+    def _medoid(self, k: int) -> int:
+        """The member `realize` keeps under dictionary='medoid': the heaviest.
+        Members are SORTED first, so a tie in mass is broken the same way it is
+        there (partition_at hands back ascending members) -- certifying a
+        different unit than the one emitted is the whole failure mode here."""
+        mem = np.sort(np.asarray(self.members[k], dtype=int))
+        return int(mem[np.argmax(self.orig.mass[mem])])
+
     def emitted_code(self, idx: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """The code of the affine function each cluster actually realizes."""
+        """The code of the affine function each cluster actually realizes: the
+        mass-weighted centroid under dictionary='merge', the surviving ORIGINAL
+        unit under 'medoid'."""
+        if self.dictionary == "medoid":
+            rep = np.array([self._medoid(int(k)) for k in np.atleast_1d(idx)],
+                           dtype=int)
+            u = self.orig.u[rep]
+            return u, u @ self.x0 - self.orig.rho[rep]
         return self._code(idx, "centroid" if self.gauge_correct else "realized")
 
     # -- scores ------------------------------------------------------------
@@ -412,10 +464,13 @@ class MashEngine:
                 d2 = (diff * diff).sum(axis=1) / max(N, 1)
                 return self._ward_weight(k, idx) * d2
             # exact_damage: the candidate merged unit's own response is needed,
-            # and it too follows from the additive projections
+            # and it too follows from the additive projections -- in the same
+            # gain as _Phi, so that v_k psi_k + v_l psi_l - (v_k + v_l) psi_c is
+            # the difference between the emitted functions.
             gk_ = self._Zg[k][None, :] + self._Zg[idx]
             rc = self.r[k] + self.r[idx]
-            nc = np.linalg.norm(self.g[k][None, :] + self.g[idx], axis=1)
+            nc = (self.A[k] + self.A[idx] if self._resp_kind == "centroid"
+                  else np.linalg.norm(self.g[k][None, :] + self.g[idx], axis=1))
             safe = np.where(nc > TINY, nc, 1.0)
             phic = np.maximum((gk_ - rc[:, None]) / safe[:, None], 0.0)
             phil = self._Phi[idx]
@@ -427,13 +482,20 @@ class MashEngine:
                     + 2.0 * wkl * (ek * el).sum(1)) / max(N, 1)
             return np.where(nc > TINY, np.clip(cost, 0.0, None), 0.0)
 
-        nk = float(np.linalg.norm(self.g[k]))
-        nl = self._norms(idx)
+        # norm(g[k]) rather than _resp_den's norm(g[[k]], axis=1): the two agree
+        # only to an ulp, and an ulp is enough to flip a tie in the argmin, so
+        # the unit-gain branch keeps the expression its recorded runs used.
+        nk = (float(self.A[k]) if self._resp_kind == "centroid"
+              else float(np.linalg.norm(self.g[k])))
+        nl = self._resp_den(idx)
         Dkk = max(float(self._D[k, k]), 0.0)
         Dll = np.clip(self._D[idx, idx], 0.0, None)
         Dkl = self._D[k, idx]
         SDk, SDl = np.sqrt(Dkk), np.sqrt(Dll)
-        # unit-gain response of a cluster: t = (g^T x - r) / ||g||
+        # response of a cluster: t = (g^T x - r) / den, with den = ||g|| for the
+        # unit-gain phi and A_C for the emitted psi (see _resp_den). Only the
+        # SCALE s carries den; the standardized threshold z is free of it, which
+        # is why the two gauges share this whole block.
         zk = (self.r[k] - self._dotmu[k]) / max(SDk, 1e-300)
         zl = (self.r[idx] - self._dotmu[idx]) / np.maximum(SDl, 1e-300)
         sk = SDk / max(nk, TINY)
@@ -451,8 +513,8 @@ class MashEngine:
         # exact_damage: bring in the candidate merged unit and the fan-out Gram
         Dcc = np.clip(Dkk + 2.0 * Dkl + Dll, 0.0, None)
         SDc = np.sqrt(Dcc)
-        gc = self.g[k] + self.g[idx]
-        nc = np.linalg.norm(gc, axis=1)
+        nc = (self.A[k] + self.A[idx] if self._resp_kind == "centroid"
+              else np.linalg.norm(self.g[k] + self.g[idx], axis=1))
         zc = (self.r[k] + self.r[idx] - self._dotmu[k] - self._dotmu[idx]) \
             / np.maximum(SDc, 1e-300)
         sc = SDc / np.where(nc > TINY, nc, TINY)
@@ -489,8 +551,10 @@ class MashEngine:
 
     def _cert_term(self, k: int) -> float:
         """sum_i a_i (R ||u_i - uhat|| + |gamma_i - gammahat|) over the members
-        of cluster k, against the code it actually emits. Summing this over the
-        active clusters bounds sup_x ||F_T(x) - F_0(x)|| on the box."""
+        of cluster k, against the code it actually emits -- so it follows the
+        DICTIONARY, not just the gauge. Summing this over the active clusters
+        bounds sup_x ||F_T(x) - F_0(x)|| on the box, for the SUM rule: a global
+        repair re-solves the columns and is outside the derivation."""
         mem = np.array(self.members[k])
         uh, oh = self.emitted_code(np.array([k]))
         du = self.orig.u[mem] - uh[0]
@@ -669,9 +733,20 @@ def realize(units: Units, ok: np.ndarray, clusters: list[list[int]],
             g = (a[m, None] * units.u[m]).sum(axis=0)
             n = float(np.linalg.norm(g))
             A = float(a[m].sum())
-            if n < TINY:                          # total cancellation: delete
-                rows.append(np.zeros(units.u.shape[1])); biases.append(0.0)
-                cols.append(w_sum); keep.append(int(m[0]))
+            if n < TINY:
+                # Total cancellation: the members' covectors sum to zero, so no
+                # hyperplane exists -- but the mass-weighted mean pre-activation
+                # is still the CONSTANT -r_C/A_C, and the gauge-corrected
+                # emission realizes sigma of it. A zero row plus that bias emits
+                # exactly the atom the certificate is written against; emitting
+                # zero instead silently drops a contribution the bound has
+                # already paid for. Without gauge correction the emitted atom is
+                # sigma of the unit-gain code, which is 0/0 here, so that
+                # variant keeps deleting.
+                rho_c = float((a[m] * units.rho[m]).sum()) / max(A, TINY)
+                rows.append(np.zeros(units.u.shape[1]))
+                biases.append(-rho_c if gauge_correct else 0.0)
+                cols.append(w_sum); keep.append(int(m[np.argmax(a[m])]))
                 continue
             eta = n / A if A > TINY else 1.0
             u_new = g / n
@@ -1181,7 +1256,7 @@ class _MashBase(PruningMethod):
                             idx_map=idx_map, n_mergeable=len(idx_map))
         eng = MashEngine(sub, score=self.score, x0=x0, radius=rad, mu=mu,
                          Sigma=Sigma, gauge_correct=self.gauge_correct,
-                         measure=measure, Z=Z)
+                         measure=measure, Z=Z, dictionary=self.dictionary)
         recs = eng.dendrogram()
         return MashPlan(layer_idx=layer_idx,
                         pairs=[(r["survivor"], r["removed"]) for r in recs],
@@ -1254,6 +1329,13 @@ class MASHCertified(_MashBase):
     advance. The bound is
         sum_C sum_{i in C} a_i (R ||u_i - uhat_C|| + |gamma_i - gammahat_C|)
     which upper-bounds sup_x ||F_T(x) - F_0(x)|| over the calibration box.
+    (uhat_C, gammahat_C) is the code the DICTIONARY emits -- the mass-weighted
+    centroid under `merge`, the surviving original unit under `medoid` -- and
+    the reported certificate is the ACCEPTED cut's, not the final state of a
+    pass that deliberately continues past it. Both of those were wrong before
+    the gauge audit, in the direction of a bound that does not hold and a
+    number 39x too large respectively. The derivation is the sum rule's, so it
+    covers `repair='sum'` only.
 
     `scale='mass'` normalizes by the layer's total mass sum_i a_i (no
     activations needed, so the whole rule stays domain-only); `scale='output'`
@@ -1288,7 +1370,7 @@ class MASHCertified(_MashBase):
             return PruneDecision(remove=[])
         eng = MashEngine(sub, score=self.score, x0=x0, radius=rad, mu=mu,
                          Sigma=Sigma, gauge_correct=self.gauge_correct,
-                         measure=measure, Z=Z)
+                         measure=measure, Z=Z, dictionary=self.dictionary)
         if self.scale == "mass":
             denom = eng.mass_total()
         else:
@@ -1298,17 +1380,22 @@ class MASHCertified(_MashBase):
 
         cap = int(self.max_fraction * (H - 1))
         recs = eng.dendrogram(max_steps=max(cap, 0))
-        # last cut whose certificate is still inside the budget (first crossing)
-        T = 0
+        # Last cut whose certificate is still inside the budget (first
+        # crossing). The pass deliberately runs PAST it -- one pass serves every
+        # tolerance -- so everything reported here has to be sliced back to the
+        # accepted prefix: the engine's final state is the certificate of a cut
+        # that was rejected (39x the accepted one on a two-layer MLP), and its
+        # cum_cost and per-unit merge steps belong to merges that never
+        # happened.
+        T, cert_T = 0, 0.0
         for t, rec in enumerate(recs, start=1):
             if rec["certificate"] > budget:
                 break
-            T = t
+            T, cert_T = t, float(rec["certificate"])
         pairs = [(r["survivor"], r["removed"]) for r in recs[:T]]
         clusters = partition_at(H, pairs, len(pairs))
         return self._emit(model, layer_idx, units, ok, idx_map, frozen,
-                          clusters, Z, mu, Sigma, recs=recs,
-                          cert=eng.certificate())
+                          clusters, Z, mu, Sigma, recs=recs[:T], cert=cert_T)
 
 
 # ── self-tests ───────────────────────────────────────────────────────────────
@@ -1404,6 +1491,73 @@ def _selftest() -> None:  # pragma: no cover
     assert cert >= realized - 1e-9, \
         f"certificate {cert:.4e} must bound realized {realized:.4e}"
 
+    # 7b. The certificate must be written against the atom the DICTIONARY
+    # emits. Under 'medoid' the emitted representative is an original unit, and
+    # bounding the distance to the centroid instead says nothing about it: on a
+    # three-unit fan whose heaviest member sits at the edge, the centroid bound
+    # is 1.5x SMALLER than the error the medoid emission actually makes.
+    fan = np.array([-0.15, 0.0, 0.15])
+    u_fan = np.stack([np.cos(fan), np.sin(fan)], axis=1)
+    fan_units = Units(u_fan, np.array([-1.5, -1.0, -0.5]), np.ones(3),
+                      np.tile([[1.0, 0.3]], (3, 1)))
+    fan_ok = np.ones(3, dtype=bool)
+    S2 = rng.normal(size=(60000, 2))
+    S2 = 2.0 * S2 / np.linalg.norm(S2, axis=1, keepdims=True)   # the R-sphere
+    ref_fan = layer_out(u_fan, -fan_units.rho, fan_units.V, S2)
+    for dic in ("merge", "medoid"):
+        e_fan = MashEngine(fan_units, score="cylinder", x0=np.zeros(2),
+                           radius=2.0, dictionary=dic)
+        e_fan.dendrogram()
+        rows, biases, cols, keep, _ = realize(fan_units, fan_ok, [[0, 1, 2]],
+                                              dictionary=dic, repair="sum")
+        real = float(np.linalg.norm(
+            layer_out(rows, biases, cols, S2) - ref_fan, axis=1).max())
+        assert e_fan.certificate() >= real - 1e-9, \
+            (f"dictionary={dic}: certificate {e_fan.certificate():.4f} must "
+             f"bound realized {real:.4f}")
+        if dic == "medoid":                      # the regression, pinned
+            centroid_bound = MashEngine(fan_units, score="cylinder",
+                                        x0=np.zeros(2), radius=2.0)
+            centroid_bound.dendrogram()
+            assert centroid_bound.certificate() < real, \
+                "the centroid bound is supposed to be the unsound one here"
+
+    # ... and the engine has to agree with `realize` about WHICH member
+    # survives, tie-breaks included, or it certifies a unit nobody emitted
+    e_med = MashEngine(units, score="cylinder", x0=x0, radius=R,
+                       dictionary="medoid")
+    recs = e_med.dendrogram(max_steps=6)
+    cl = partition_at(H, [(r["survivor"], r["removed"]) for r in recs], 6)
+    rows, biases, cols, keep, _ = realize(units, ok, cl, dictionary="medoid",
+                                          repair="sum")
+    by_set = {frozenset(c): s for c, s in zip(cl, keep)}
+    for kk in np.flatnonzero(e_med.active):
+        assert by_set[frozenset(e_med.members[kk])] == e_med._medoid(int(kk)), \
+            f"engine medoid disagrees with realize for cluster {kk}"
+    realized = np.abs(layer_out(rows, biases, cols, box) - ref_box).sum(axis=1).max()
+    assert recs[-1]["certificate"] >= realized - 1e-9, \
+        (f"medoid certificate {recs[-1]['certificate']:.4e} must bound "
+         f"realized {realized:.4e}")
+
+    # 7c. g_C = 0: the members cancel, so there is no hyperplane -- but the
+    # centroid pre-activation is a nonzero CONSTANT, and the gauge-corrected
+    # emission has to realize it. Emitting zero dropped a contribution the
+    # certificate had already paid for.
+    anti = Units(np.array([[1.0, 0.0], [-1.0, 0.0]]), np.array([-1.0, -1.0]),
+                 np.ones(2), np.array([[1.0], [1.0]]))
+    e_anti = MashEngine(anti, score="cylinder", x0=np.zeros(2), radius=1.0)
+    e_anti.step()
+    uh, oh = e_anti.emitted_code(np.array([0]))
+    rows, biases, cols, keep, _ = realize(anti, np.ones(2, bool), [[0, 1]],
+                                          repair="sum")
+    assert np.allclose(rows[0], 0.0) and abs(biases[0] - oh[0]) < 1e-12, \
+        f"g=0 must emit the constant sigma({oh[0]:.3f}), got bias {biases[0]}"
+    S1 = np.linspace(-1.0, 1.0, 2001)[:, None] * np.array([[1.0, 0.0]])
+    real = float(np.abs(layer_out(rows, biases, cols, S1)
+                        - layer_out(anti.u, -anti.rho, anti.V, S1)).max())
+    assert e_anti.certificate() >= real - 1e-9, \
+        f"g=0 certificate {e_anti.certificate():.4f} must bound {real:.4f}"
+
     # 8. repair is ordered: global <= projection <= sum
     recs = MashEngine(units, score="delta_f", x0=x0, radius=R, mu=mu,
                       Sigma=Sigma).dendrogram(max_steps=5)
@@ -1416,6 +1570,41 @@ def _selftest() -> None:  # pragma: no cover
     assert errs["kernel"] <= errs["projection"] + 1e-8, errs
     assert errs["projection"] <= errs["sum"] + 1e-8, errs
     assert errs["empirical"] <= errs["sum"] + 1e-8, errs
+
+    # 8b. exact_damage must equal the damage of the merge it actually scores,
+    # under BOTH gauges: it is the one score that claims to be exact, so a
+    # response written in a gain the emission does not use is simply a
+    # different quantity (it mispriced pairs by up to 28% under the default).
+    energy = float((ref * ref).sum(axis=1).mean())
+    for gc in (True, False):
+        engd = MashEngine(units, score="exact_damage", measure="empirical",
+                          Z=X, x0=x0, radius=R, gauge_correct=gc)
+        for i, j in [(0, 1), (2, 6), (7, 8), (9, 11), (3, 4)]:
+            scored = float(engd._pair_costs(i, np.array([j]))[0])
+            cl = [[t] for t in range(H) if t not in (i, j)] + [[i, j]]
+            rows, biases, cols, keep, _ = realize(units, ok, cl, repair="sum",
+                                                  gauge_correct=gc)
+            err = layer_out(rows, biases, cols, X) - ref
+            truth = float((err * err).sum(axis=1).mean())
+            assert abs(scored - truth) < 1e-9 * energy, \
+                (f"exact_damage {scored:.6e} != realized damage {truth:.6e} "
+                 f"for pair {(i, j)}, gauge_correct={gc}")
+
+    # ... and the Gaussian branch against a large sample of its own measure
+    XG = rng.multivariate_normal(mu, Sigma, size=200_000)
+    refG = layer_out(units.u, -units.rho, units.V, XG)
+    engg = MashEngine(units, score="exact_damage", x0=x0, radius=R, mu=mu,
+                      Sigma=Sigma)
+    for i, j in [(0, 1), (7, 8)]:
+        scored = float(engg._pair_costs(i, np.array([j]))[0])
+        cl = [[t] for t in range(H) if t not in (i, j)] + [[i, j]]
+        rows, biases, cols, keep, _ = realize(units, ok, cl, repair="sum")
+        pv = ((layer_out(rows, biases, cols, XG) - refG) ** 2).sum(axis=1)
+        mc = float(pv.mean())
+        tol_mc = 5e-3 * mc + 4.0 * float(np.sqrt(pv.var() / len(pv)))
+        assert abs(scored - mc) < tol_mc, \
+            (f"gaussian exact_damage {scored:.6e} vs sample {mc:.6e} "
+             f"(tol {tol_mc:.2e}) for pair {(i, j)}")
 
     # 9. registry round-trip and parameter validation
     from src.pruning.registry import build_pruning_method
@@ -1474,6 +1663,40 @@ def _selftest() -> None:  # pragma: no cover
         e_ = MashEngine(empty, score="cylinder", x0=np.zeros(4), radius=1.0)
         assert e_.dendrogram() == [], f"H={H_} should yield no merges"
         assert e_.certificate() == 0.0
+
+    # 9e. The certified tier runs its pass PAST the accepted cut, so every
+    # number it reports has to be sliced back to that cut. It used to report the
+    # final engine state instead: 39x the accepted certificate on a two-layer
+    # MLP, i.e. a tolerance that looked violated by the method enforcing it.
+    from src.models.mlp import MLP
+    torch.manual_seed(0)
+    mnet = MLP(hidden_sizes=[24], input_dim=16, output_dim=3).eval()
+    Xm = torch.randn(48, 16)
+    mctx = PruneContext(train_inputs=Xm, bundle=None, device=torch.device("cpu"))
+    cmeth = build_pruning_method("mash_certified", tol=0.5, n_calib=48)
+    dec = cmeth.select(mnet, 0, mctx)
+    sc = dec.diagnostics["_scalars"]
+    prep = cmeth._prepare(mnet, 0, mctx)
+    e_ref = MashEngine(prep[4], score="cylinder", x0=prep[8], radius=prep[10],
+                       dictionary=cmeth.dictionary)
+    rc = e_ref.dendrogram()
+    budget = 0.5 * e_ref.mass_total()
+    T, cert_T = 0, 0.0
+    for t, r_ in enumerate(rc, start=1):
+        if r_["certificate"] > budget:
+            break
+        T, cert_T = t, float(r_["certificate"])
+    assert 0 < T < len(rc), \
+        f"the test needs a cut strictly inside the pass, got T={T}/{len(rc)}"
+    assert len(dec.remove) == T, (len(dec.remove), T)
+    assert abs(sc["certificate"] - cert_T) < 1e-9 * max(cert_T, 1.0), \
+        (f"reported certificate {sc['certificate']:.4f} is not the accepted "
+         f"cut's {cert_T:.4f} (final state would be {e_ref.certificate():.4f})")
+    assert sc["certificate"] <= budget + 1e-9, \
+        f"reported certificate {sc['certificate']:.4f} exceeds budget {budget:.4f}"
+    cum_T = sum(r_["cost"] for r_ in rc[:T])
+    assert abs(sc["cum_cost"] - cum_T) < 1e-9 * max(cum_T, 1.0), \
+        f"reported cum_cost {sc['cum_cost']:.4g} is not the cut's {cum_T:.4g}"
 
     # 10. Conv + BatchNorm end to end. The merged dictionary is refused here on
     # purpose (a folded hyperplane cannot be written back through the BN), the
@@ -1537,7 +1760,11 @@ def _selftest() -> None:  # pragma: no cover
     print("  duplicate merge exact to 1e-9; additive triples order-free")
     print("  mass and covector sum conserved over a full sweep")
     print("  certificate bounds the realized sup error on the box")
+    print("  certificate follows the dictionary (merge AND medoid emissions)")
+    print("  g_C = 0 emits its centroid constant, still inside the bound")
     print("  repair ordering global <= projection <= sum (and empirical <= sum)")
+    print("  exact_damage == realized merge damage, both gauges (and vs MC)")
+    print("  certified tier reports the ACCEPTED cut's certificate/cum_cost")
     print("  registry round-trip for mash / mash_certified + param validation")
     print(f"  Lance-Williams update == direct Ward increment ({worst:.1e})")
     print("  row-minimum cache == brute-force argmin, all 3 scores (exact)")
