@@ -280,8 +280,12 @@ efficiency report on the OPT-1.3b probe (5% GPU utilization, 7% of 128G):
 2. **PARALLEL cells per GPU.** `PARALLEL=k` in the job body runs k cells of a
    task's share side by side on one GPU (each its own process, finer strided
    sub-shards), so the card is busy while the others plan or load. Pair it
-   with `--cpus-per-task=2k`. k=3 fits any ImageNet model or OPT-1.3b on a
-   40GB card.
+   with `--cpus-per-task=2k`. k=3 fits OPT-1.3b, OPT-350m and the CIFAR
+   ResNets. NOT ImageNet: each ImageNet process holds the 20000-image
+   calibration set as float32 (12 GB host, 10.8 GB of it copied to the GPU),
+   so three of them blew the 48G host request and were SIGKILLed with no
+   traceback (the 2026-09-10 retry and resnet18 repair arrays). ImageNet runs
+   one cell per task.
 3. **Memory** requests are right-sized: medium 32G, large 48G (6.7b: pass
    `--mem=96G`).
 
@@ -298,11 +302,10 @@ for m in cifar10_resnet20 cifar10_resnet56 wikitext_opt125m wikitext_opt350m; do
   sbatch --export=ALL,PARALLEL=3 --cpus-per-task=6 --array=1-$(( (n + 2) / 3 )) \
          scripts/slurm_medium.sh configs/benchmark/manifest_repair_$m.txt
 done
-# ImageNet: large class, 3 cells per GPU
+# ImageNet: large class, ONE cell per task (see PARALLEL note above)
 for m in imagenet_resnet18 imagenet_resnet50 imagenet_mobilenetv2 imagenet_vit_b16; do
   n=$(wc -l < configs/benchmark/manifest_repair_$m.txt)
-  sbatch --export=ALL,PARALLEL=3 --cpus-per-task=6 --array=1-$(( (n + 2) / 3 )) \
-         scripts/slurm_large.sh configs/benchmark/manifest_repair_$m.txt
+  sbatch --array=1-$n scripts/slurm_large.sh configs/benchmark/manifest_repair_$m.txt
 done
 # OPT-1.3b, seed 0. Stage 1 = the 4 planning arms + random/magnitude/osscar
 # (7 cells, 3 per GPU, 3 tasks); stage 2 = the 11 repair variants, 6 of which
@@ -314,7 +317,9 @@ sbatch --dependency=afterany:$j --export=ALL,SEED=0,PARALLEL=3 --cpus-per-task=6
       scripts/slurm_large.sh configs/benchmark/manifest_repair_wikitext_opt1.3b_stage2.txt
 ```
 
-Stage 1 of OPT-1.3b is a superset of §4 step 4's MASH delta_f arms (the two
+`run_manifest` skips any cell whose report.json is already on scratch (pass
+`--rerun` to force), so resubmitting a whole manifest after a partial failure
+costs only the missing cells. Stage 1 of OPT-1.3b is a superset of §4 step 4's MASH delta_f arms (the two
 cylinder arms are the only scale-tier cells it lacks), so submit §4 step 4 as
 stage 1's sibling or skip it. Add `--exclude=$(sort -u logs/bad_nodes.txt |
 paste -sd,)` if that file is non-empty. Figures:

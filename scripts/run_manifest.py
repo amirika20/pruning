@@ -95,6 +95,24 @@ def collect(args) -> list[Path]:
     return cells
 
 
+def is_done(cfg: Path, out: str, seed: int | None) -> bool:
+    """Every seed this run would sweep already has a report.json under `out`.
+
+    Resubmissions used to redo finished cells (a retry array re-ran the two
+    cells that had survived alongside the failed ones). A cell's outputs are
+    what the tables read, so a present report IS the cell being done; --rerun
+    overrides for a deliberate recomputation.
+    """
+    try:
+        import yaml
+        d = yaml.safe_load(cfg.read_text())
+        seeds = [seed] if seed is not None else list(d.get("seeds", [0]))
+        return all((Path(out) / d["name"] / f"seed_{s}" / "report.json").exists()
+                   for s in seeds)
+    except Exception:                                  # noqa: BLE001
+        return False
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -112,12 +130,32 @@ def main() -> None:
                          "AND any sweep_fractions the configs carry")
     ap.add_argument("--seed", type=int, default=None, help="one seed only")
     ap.add_argument("--out", default=f"{SCRATCH}/results")
+    ap.add_argument("--rerun", action="store_true",
+                    help="run cells even when every seed already has a report.json "
+                         "(default: skip them, so a resubmission only does what is missing)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
     cells = collect(args)
+    if not cells and args.shard:
+        # A sub-shard beyond the manifest's length (11 cells over 12 shards) has
+        # nothing to do and that is not a failure -- the job body used to report
+        # it as one.
+        print(f"shard {args.shard}: no cells fall to this shard; nothing to do")
+        return
     if not cells:
         raise SystemExit("nothing to run: pass --resources, --manifest or --config")
+    if not args.rerun:
+        done = [c for c in cells if is_done(c, args.out, args.seed)]
+        if done:
+            print(f"skipping {len(done)} cell(s) whose report.json already exists "
+                  f"(--rerun to redo):")
+            for c in done:
+                print(f"  {c.relative_to(ROOT) if c.is_relative_to(ROOT) else c}")
+            cells = [c for c in cells if c not in set(done)]
+        if not cells:
+            print("every cell in this share is already done")
+            return
 
     print(f"{len(cells)} cell(s), grid={args.grid}, out={args.out}")
     if args.dry_run:
