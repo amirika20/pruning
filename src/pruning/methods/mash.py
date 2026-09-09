@@ -992,6 +992,10 @@ class MashPlan:
     recs: list[dict]
     idx_map: np.ndarray
     n_mergeable: int
+    # Mass of each mergeable unit at planning time, so the MEDOID dictionary's
+    # removed set (every cluster member but its heaviest) can be reconstructed
+    # from the serialized dendrogram alone. Not used by the cut itself.
+    mass: np.ndarray | None = None
 
     @property
     def max_merges(self) -> int:
@@ -1001,6 +1005,29 @@ class MashPlan:
         """Merge count for a target fraction of this layer's units."""
         return max(0, min(int(round(fraction * (self.n_mergeable - 1))),
                           self.max_merges))
+
+    def to_record(self) -> dict:
+        """The dendrogram as plain JSON, in the LAYER's own unit indices.
+
+        Every step is (survivor, removed, cost, certificate), so a cut at any
+        width -- and any score-vs-oracle or overlap study -- can be re-read from
+        the file without re-planning, which at OPT-6.7b is hours per layer.
+        `mergeable` is idx_map: the sub-index -> layer-index map the pairs were
+        recorded in; `frozen` units (zero-norm rows) never enter the pass.
+        """
+        idx = [int(i) for i in self.idx_map]
+        steps = []
+        for (s, r), rec in zip(self.pairs, self.recs):
+            row = {"survivor": idx[s], "removed": idx[r],
+                   "cost": float(rec.get("cost", float("nan")))}
+            if "certificate" in rec:
+                row["certificate"] = float(rec["certificate"])
+            steps.append(row)
+        out = {"layer": int(self.layer_idx), "n_mergeable": int(self.n_mergeable),
+               "mergeable": idx, "steps": steps}
+        if self.mass is not None:
+            out["mass"] = [float(a) for a in self.mass]
+        return out
 
 
 class _MashBase(PruningMethod):
@@ -1260,7 +1287,8 @@ class _MashBase(PruningMethod):
         recs = eng.dendrogram()
         return MashPlan(layer_idx=layer_idx,
                         pairs=[(r["survivor"], r["removed"]) for r in recs],
-                        recs=recs, idx_map=idx_map, n_mergeable=len(idx_map))
+                        recs=recs, idx_map=idx_map, n_mergeable=len(idx_map),
+                        mass=np.asarray(sub.mass, dtype=float).copy())
 
     def emit_at(self, model: PrunableModel, layer_idx: int, plan: MashPlan,
                 n_merges: int, ctx: PruneContext) -> PruneDecision:

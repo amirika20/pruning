@@ -115,9 +115,18 @@ entries:
     model: {kind: resnet_cifar, params: {depth: 56, pretrained: true}}
 
   # ── ImageNet-1k: downloaded (torchvision) ─────────────────────────────────
+  # SCALE TIER (arms.yaml `scale:`): the 9-arm set the big models carry, and an
+  # explicit width grid. The default 16-point linspace starts at 5.9% removed,
+  # and every ImageNet cell finished so far had already crossed the tolerance
+  # there (cap005 = cap01 = 0.0 across the board) -- on 1000 classes with no
+  # fine-tuning even the finest default point is too coarse. So the grid here
+  # starts at 1% and is dense below 10%, then coarsens; capacities are
+  # first-crossing and grid-independent, AUC is comparable only within this tier.
   # Point data.params.root at the cluster's ImageNet; n_test drives the accuracy
   # estimate, and the -1pt tolerance needs >= 2000 val images to be meaningful.
   - name: imagenet_resnet18
+    arms_tier: scale
+    sweep_fractions: [0.01, 0.02, 0.03, 0.05, 0.07, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50]
     bn: true            # prunable convs are BN-paired: no merge dictionary
     family: conv
     resources: large
@@ -126,6 +135,8 @@ entries:
     model: {kind: resnet_imagenet, params: {depth: 18, pretrained: true}}
 
   - name: imagenet_resnet50
+    arms_tier: scale
+    sweep_fractions: [0.01, 0.02, 0.03, 0.05, 0.07, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50]
     bn: true            # prunable convs are BN-paired: no merge dictionary
     family: conv
     resources: large
@@ -134,6 +145,8 @@ entries:
     model: {kind: resnet_imagenet, params: {depth: 50, pretrained: true}}
 
   - name: imagenet_mobilenetv2
+    arms_tier: scale
+    sweep_fractions: [0.01, 0.02, 0.03, 0.05, 0.07, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50]
     bn: true            # prunable convs are BN-paired: no merge dictionary
     family: conv
     resources: large
@@ -142,6 +155,8 @@ entries:
     model: {kind: mobilenet_v2, params: {width_mult: 1.0, pretrained: true}}
 
   - name: imagenet_vit_b16
+    arms_tier: scale
+    sweep_fractions: [0.01, 0.02, 0.03, 0.05, 0.07, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50]
     # hope excluded: its merge search is O(H^2) pair solves and ViT's MLP is
     # 3072 wide with no BN, so unlike the ResNets it does NOT degrade to the
     # cheap prune-only path. The H^2.28 fit puts one layer at ~1582s, so 12
@@ -168,6 +183,11 @@ entries:
     model: {kind: vit, params: {variant: b_16, pretrained: true}}
 
   # ── WikiText-2 / OPT: downloaded (HuggingFace) ────────────────────────────
+  # The 1.3b+ entries are scale tier with a 10-point grid: at opt350m the
+  # delta_f arms spent as long in the 16 per-width global repairs (solve
+  # ~4900s) as in the one planning pass (~3900s), and the per-width cost grows
+  # with width^2.5-3.9, so a shorter grid is what keeps a 1.3b seed inside the
+  # 16h wall. Points are denser below 20%, where the LMs cross.
   # An FFN neuron is exactly the layer of the theory, so every FC arm applies.
   # float32 footprint ~4 bytes/param: 1.3b ~5GB, 2.7b ~11GB, 6.7b ~27GB,
   # 13b ~52GB before activations.
@@ -220,6 +240,8 @@ entries:
     model: {kind: opt, params: {size: 350m, pretrained: true}}
 
   - name: wikitext_opt1.3b
+    arms_tier: scale
+    sweep_fractions: [0.02, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50, 0.65, 0.80]
     family: fc
     resources: large
     # OFF for OPT at every size -- see the 125m entry. The K matrix is one
@@ -231,6 +253,8 @@ entries:
     model: {kind: opt, params: {size: 1.3b, pretrained: true}}
 
   - name: wikitext_opt2.7b
+    arms_tier: scale
+    sweep_fractions: [0.02, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50, 0.65, 0.80]
     family: fc
     resources: large
     # OFF for OPT at every size -- see the 125m entry. The K matrix is one
@@ -250,6 +274,8 @@ entries:
   #     sbatch --gres=gpu:h100:1 --array=... scripts/slurm_xlarge.sh <manifest>
   # or halve the footprint by loading in bf16.
   - name: wikitext_opt6.7b
+    arms_tier: scale
+    sweep_fractions: [0.02, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50, 0.65, 0.80]
     family: fc
     resources: large
     # OFF for OPT at every size -- see the 125m entry. The K matrix is one
@@ -265,6 +291,8 @@ entries:
     model: {kind: opt, params: {size: 6.7b, pretrained: true, dtype: float16}}
 
   - name: wikitext_opt13b
+    arms_tier: scale
+    sweep_fractions: [0.02, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50, 0.65, 0.80]
     family: fc
     resources: xlarge
     # OFF for OPT at every size -- see the 125m entry. The K matrix is one

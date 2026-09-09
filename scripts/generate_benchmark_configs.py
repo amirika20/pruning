@@ -75,15 +75,21 @@ def expand_arms(arms_spec: dict) -> list[dict]:
                         "requires_nobn": needs_nobn})
 
     headline = set(arms_spec.get("headline") or [])
+    # `scale` is a third, overlapping set rather than a tier value: the arms the
+    # big models carry (see arms.yaml). An arm can be both headline and scale.
+    scale = set(arms_spec.get("scale") or [])
     seen: dict[str, dict] = {}
     for a in out:
         if a["name"] in seen:
             raise ValueError(f"duplicate arm name {a['name']!r}")
         a["tier"] = "headline" if a["name"] in headline else "ablation"
+        a["scale"] = a["name"] in scale
         seen[a["name"]] = a
-    unknown = headline - set(seen)
-    if unknown:
-        raise ValueError(f"arms.yaml headline names no such arm(s): {sorted(unknown)}")
+    for label, names in (("headline", headline), ("scale", scale)):
+        unknown = names - set(seen)
+        if unknown:
+            raise ValueError(
+                f"arms.yaml {label} names no such arm(s): {sorted(unknown)}")
     return out
 
 
@@ -133,7 +139,15 @@ def build_config(entry: dict, arm: dict, defaults: dict,
         "analyze_geometry": bool(
             entry.get("analyze_geometry",
                       defaults.get("analyze_geometry",
-                                  arm.get("tier") == "headline"))),
+                                  arm.get("tier") == "headline"
+                                  or arm.get("scale", False)))),
+        # An explicit width grid for this entry, when the default 16-point
+        # linspace is wrong for it: ImageNet-1k needs points BELOW 6% (every
+        # cell so far crossed the tolerance before the first default point),
+        # and the big OPTs cannot afford 16 global solves per seed. Recorded in
+        # the config so the grid a table was read from is part of the record.
+        **({"sweep_fractions": [float(f) for f in entry["sweep_fractions"]]}
+           if entry.get("sweep_fractions") else {}),
         "deterministic": bool(defaults.get("deterministic", True)),
         # A downloaded checkpoint saw the whole official train split, so the val
         # slice carved from it is training data to that model. Grade it on test.
@@ -154,7 +168,8 @@ def main() -> None:
                     help="keep only these suite entries (by name)")
     ap.add_argument("--resources", nargs="*", default=None,
                     help="keep only these resource classes")
-    ap.add_argument("--tier", choices=("headline", "ablation", "all"), default=None,
+    ap.add_argument("--tier", choices=("headline", "ablation", "scale", "all"),
+                    default=None,
                     help="override every entry's arms_tier (default: per-entry)")
     ap.add_argument("--output-root", default=None,
                     help="where results go (default: suite.yaml's, i.e. lab scratch)")
@@ -197,6 +212,8 @@ def main() -> None:
                 continue
             if tier == "ablation" and arm["tier"] == "headline":
                 continue
+            if tier == "scale" and not arm["scale"]:
+                continue
             if arm["name"] in (entry.get("exclude_arms") or ()):
                 # Measured, not guessed: HOPE's pair enumeration scales H^2.28,
                 # so a 3072-wide OPT layer costs ~1583s to plan and its 12
@@ -232,6 +249,15 @@ def main() -> None:
             cls = entry.get("resources", "small")
             by_class.setdefault(cls, []).append(rec)
             by_class.setdefault(f"{cls}_{arm['tier']}", []).append(rec)
+            if arm["scale"]:
+                by_class.setdefault(f"{cls}_scale", []).append(rec)
+            if tier == "scale":
+                # One manifest per big model: these cells are hours each and
+                # get submitted model by model, seed by seed (see
+                # studies/SUBMIT_NEXT.md), not as one class-wide array. Only
+                # for entries ON the scale tier -- the cheap `all` entries
+                # carry these arms inside their class manifest already.
+                by_class.setdefault(f"scale_{entry['name']}", []).append(rec)
             kept += 1
             if not args.dry_run:
                 path = OUT / rel
@@ -262,12 +288,15 @@ def main() -> None:
         print(f"\nwrote {OUT}")
         print(f"wrote {BENCH / 'manifest.txt'} ({len(manifest)} lines)")
         base = {c: r for c, r in by_class.items()
-                if not c.endswith(("_headline", "_ablation"))}
+                if not c.endswith(("_headline", "_ablation", "_scale"))
+                and not c.startswith("scale_")}
         print("\ncells per class:")
         for cls in sorted(base):
             h = len(by_class.get(f"{cls}_headline", []))
             a = len(by_class.get(f"{cls}_ablation", []))
-            print(f"  {cls:<8}{len(base[cls]):>5} total  ({h} headline, {a} ablation)")
+            s = len(by_class.get(f"{cls}_scale", []))
+            print(f"  {cls:<8}{len(base[cls]):>5} total  "
+                  f"({h} headline, {a} ablation, {s} scale)")
         print("\nstaged submission -- headline first populates Tables 2/3:")
         print("  bash scripts/submit_benchmark.sh --tier headline")
         print("  bash scripts/submit_benchmark.sh --tier ablation")

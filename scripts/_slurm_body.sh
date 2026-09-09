@@ -181,6 +181,16 @@ fi
 # blocked connection. Set HF_HUB_OFFLINE=0 to allow in-job downloads.
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export TOKENIZERS_PARALLELISM=false
+# Host threads = cores allocated. Job Defense Shield measured every task of the
+# 4- and 8-core runs at exactly one core busy (CPU-Util 25% of 4, i.e. one
+# thread): the pipeline is GPU-side torch with no DataLoader workers, and the
+# numpy/scipy planning is scalar-bound, not BLAS-bound. So the job scripts now
+# ask for 2 cores (main thread + CUDA driver/allocator threads), and these pin
+# every BLAS/OpenMP pool to that count so a library cannot oversubscribe it
+# either. Raise --cpus-per-task only after `jobstats` shows the second core used.
+_NT="${SLURM_CPUS_PER_TASK:-2}"
+export OMP_NUM_THREADS="$_NT" MKL_NUM_THREADS="$_NT" OPENBLAS_NUM_THREADS="$_NT" \
+       NUMEXPR_NUM_THREADS="$_NT"
 # torch-only: stop transformers probing the TensorFlow/Flax backends, which
 # costs seconds of startup per cell and buries the log in absl/oneDNN notices.
 export TRANSFORMERS_NO_TF=1 TRANSFORMERS_NO_FLAX=1 USE_TF=0 USE_FLAX=0
@@ -193,6 +203,10 @@ export TF_CPP_MIN_LOG_LEVEL=3 TF_ENABLE_ONEDNN_OPTS=0
 GRID="${GRID:-16}"
 ARGS=(--grid "$GRID" --out "$RESULTS_ROOT")
 [[ -n "${SEED:-}" ]] && ARGS+=(--seed "$SEED")
+# FRACTIONS="0.01 0.02 0.05" overrides every cell's grid, including a
+# sweep_fractions the config carries. Normally leave it unset: the scale-tier
+# entries record their own grid in suite.yaml, and that is what the tables cite.
+[[ -n "${FRACTIONS:-}" ]] && ARGS+=(--fractions $FRACTIONS)
 
 if [[ "$TARGET" == *.yaml ]]; then
     ARGS+=(--config "$TARGET")

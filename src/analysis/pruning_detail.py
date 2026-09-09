@@ -186,6 +186,56 @@ def overlap_table(reports: dict[str, Sequence[dict]]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def load_removals(path: str | Path) -> dict:
+    """One seed's removals.json (accepts the seed dir or the file), as written
+    by scripts/run_sweep.py: {"widths": [H_0, ...], "by_fraction":
+    {"0.100000": {"0": [...], "1": [...]}, ...}}."""
+    p = Path(path)
+    if p.is_dir():
+        p = p / "removals.json"
+    return json.loads(p.read_text())
+
+
+def removals_as_report(removals: dict, fraction: float,
+                       tol: float = 1e-6) -> list[dict]:
+    """The removed sets at one swept fraction, in the per-layer report shape
+    overlap_table reads (layer, neurons_before, removed_indices)."""
+    keys = {float(k): k for k in removals["by_fraction"]}
+    hit = [k for f, k in keys.items() if abs(f - fraction) <= tol]
+    if not hit:
+        raise KeyError(f"fraction {fraction} not swept; have {sorted(keys)}")
+    by_layer = removals["by_fraction"][hit[0]]
+    return [{"layer": int(li), "neurons_before": int(H),
+             "removed_indices": [int(i) for i in by_layer.get(str(li), [])]}
+            for li, H in enumerate(removals["widths"])]
+
+
+def overlap_from_removals(runs: dict[str, str | Path],
+                          fractions: Sequence[float] | None = None
+                          ) -> pd.DataFrame:
+    """overlap_table across benchmark cells, from their removals.json files.
+
+    `runs` maps a label (e.g. "osscar", "mash_medoid_empirical_delta_f") to a
+    seed directory. Every width the cells share is compared -- the question
+    "does MASH remove the units OSSCAR removes?" has a different answer at 5%
+    and at 50%, so the result carries a `fraction` column. Cells swept on
+    different grids are compared on the intersection only.
+    """
+    loaded = {k: load_removals(v) for k, v in runs.items()}
+    grids = [set(float(f) for f in r["by_fraction"]) for r in loaded.values()]
+    shared = sorted(set.intersection(*grids)) if grids else []
+    if fractions is not None:
+        shared = [f for f in shared
+                  if any(abs(f - g) <= 1e-6 for g in fractions)]
+    frames = []
+    for f in shared:
+        df = overlap_table({k: removals_as_report(r, f)
+                            for k, r in loaded.items()})
+        df.insert(0, "fraction", f)
+        frames.append(df)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
 # ── run loading ──────────────────────────────────────────────────────────────
 
 def load_seed_result(path: str | Path) -> dict:

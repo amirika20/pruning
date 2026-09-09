@@ -119,8 +119,18 @@ def main() -> None:
                         datefmt="%H:%M:%S")
     config = ExperimentConfig.from_yaml(args.config)
     device = torch.device(config.training.device)
-    fractions = (list(args.fractions) if args.fractions
-                 else list(np.linspace(0.95 / args.grid, 0.95, args.grid)))
+    # Precedence: an explicit --fractions, then the config's own grid, then the
+    # --grid linspace. The config wins over --grid because the job scripts
+    # always pass --grid, so an entry-specific grid (ImageNet's sub-6% points,
+    # the big OPTs' shorter grid) could never take effect otherwise.
+    if args.fractions:
+        fractions = sorted(float(f) for f in args.fractions)
+    elif config.sweep_fractions:
+        fractions = sorted(config.sweep_fractions)
+    else:
+        fractions = list(np.linspace(0.95 / args.grid, 0.95, args.grid))
+    if not all(0.0 < f < 1.0 for f in fractions):
+        raise SystemExit(f"fractions must lie in (0, 1): {fractions}")
     seeds = [args.seed] if args.seed is not None else list(config.seeds)
     root = Path(args.out or config.output_root) / config.name
 
@@ -209,6 +219,14 @@ def main() -> None:
                 {"cell": config.name, "arm": method.kind, "seed": seed,
                  "widths": widths,
                  "by_fraction": {f"{k:.6f}": v for k, v in sorted(rem.items())}}))
+        # The cached per-layer plans (for MASH, the full dendrogram in layer
+        # indices). With this file any width can be cut offline, so the sweep
+        # never has to be repeated to read the curve at a point it skipped.
+        plans = curve.attrs.get("plans") or []
+        if plans:
+            (out / "dendrogram.json").write_text(json.dumps(
+                {"cell": config.name, "arm": method.kind, "seed": seed,
+                 "widths": widths, "layers": plans}))
         (out / "report.json").write_text(json.dumps(rep, indent=2, default=str))
         logging.info("\n" + format_sweep({f"{config.name} s{seed}": rep}))
 

@@ -231,6 +231,12 @@ def sweep_widths(
     # attrs rather than a column: this is per (fraction, layer), not per row, and
     # embedding JSON in a cell would make curve.csv unreadable.
     df.attrs["removals"] = removals
+    # The plans themselves, when the method can serialize them. A MASH plan is
+    # the whole dendrogram, so keeping it makes every other width a lookup and
+    # lets the removed-set of ANY fraction be reconstructed offline -- at the
+    # big models the pass it records is hours per layer.
+    df.attrs["plans"] = [p.to_record() for p in plans.values()
+                         if hasattr(p, "to_record")]
     return df
 
 

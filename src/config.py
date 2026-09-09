@@ -144,6 +144,13 @@ class ExperimentConfig:
     # it had memorized, and every capacity for those cells was measured against
     # a contaminated baseline. Pretrained entries must use "test".
     eval_split: str = "val"
+    # The width grid the sweep visits, as fractions of each layer removed. None
+    # means run_sweep's --grid linspace (16 points in (0, 0.95]). Set per entry
+    # where that grid is wrong: ImageNet-1k crosses the tolerance below its
+    # first point, and the big OPTs cannot afford 16 global repairs per seed.
+    # Capacities are grid-independent (first crossing); AUC is not, so compare
+    # AUC only between cells that share a grid.
+    sweep_fractions: list[float] | None = None
     notes: str = ""
 
     @classmethod
@@ -165,6 +172,8 @@ class ExperimentConfig:
             require_accuracy=d.get("require_accuracy"),
             analysis_fraction=float(d.get("analysis_fraction", 0.5)),
             eval_split=str(d.get("eval_split", "val")),
+            sweep_fractions=([float(f) for f in d["sweep_fractions"]]
+                             if d.get("sweep_fractions") else None),
             notes=d.get("notes", ""),
         )
 

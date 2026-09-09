@@ -62,6 +62,33 @@ headline:
   - mash_merge_empirical_delta_f     # Ours_full on conv
   - mash_medoid_empirical_delta_f    # the conv recipe (medoid survivors)
 
+# SCALE arms are the set the big models carry: ImageNet-1k backbones and OPT
+# 1.3b and up, where a single MASH cell is hours and the design grid cannot be
+# re-run. Two external baselines only (magnitude and OSSCAR, the strongest),
+# the random floor because it is free, and MASH restricted to ONE repair --
+# empirical, the OSSCAR-like global least squares, which is the best rule on
+# every recorded model -- so the axes that remain open at scale are visible
+# without the repair confounding them:
+#   * merge vs medoid            (the dictionary; both only run where no BN)
+#   * pre- vs post-activation    (cylinder vs delta_f Ward score)
+#   * Gaussian vs sampled Grams  (measure, on the delta_f score; FC only,
+#                                 since conv already scores empirically)
+# Not carried: mash_certified (a different question -- it picks its own width),
+# hope / leo_pp / data_free_merge (data_free_merge alone was projected at 300
+# GPU-h for one opt6.7b seed). Every cell writes removals.json, so the
+# OSSCAR-vs-MASH removed-unit overlap comes from these runs without a rerun
+# (src.analysis.pruning_detail.overlap_from_removals).
+scale:
+  - random
+  - magnitude_mass
+  - osscar
+  - mash_merge_empirical_cylinder
+  - mash_medoid_empirical_cylinder
+  - mash_merge_empirical_delta_f
+  - mash_medoid_empirical_delta_f
+  - mash_sampled_merge_empirical_delta_f
+  - mash_sampled_medoid_empirical_delta_f
+
 # ── explicit arms ────────────────────────────────────────────────────────────
 arms:
 
@@ -175,6 +202,22 @@ grids:
     # NotImplementedError and points at medoid, which keeps original filters and
     # their BN slots. Generating these on a BN entry only queues cells that
     # cannot run: 16 of them failed that way on the CIFAR ResNets.
+    requires_nobn_when:
+      dictionary: [merge]
+
+  # the measure toggle on the post-activation score: delta_f's Grams from
+  # sample averages over the calibration inputs instead of the closed-form
+  # rectified-Gaussian moments. FC only -- on conv `measure` already resolves to
+  # empirical (patch-space Gaussians are misspecified, E10), so the plain
+  # mash_*_delta_f arm IS this arm there and a second copy would run twice.
+  - prefix: mash_sampled
+    kind: mash
+    fixed: {measure: empirical}
+    axes:
+      score: [delta_f]
+      dictionary: [merge, medoid]
+      repair: [empirical]
+    requires: fc
     requires_nobn_when:
       dictionary: [merge]
 

@@ -27,5 +27,17 @@ seeds:
 - 0
 output_root: /n/netscratch/pehlevan_lab/Lab/akazeminia/pruning/results
 analyze_geometry: true
+sweep_fractions:
+- 0.01
+- 0.02
+- 0.03
+- 0.05
+- 0.07
+- 0.1
+- 0.15
+- 0.2
+- 0.3
+- 0.4
+- 0.5
 deterministic: true
 eval_split: test

@@ -1,0 +1,5 @@
+configs/benchmark/generated/imagenet_mobilenetv2/random.yaml
+configs/benchmark/generated/imagenet_mobilenetv2/magnitude_mass.yaml
+configs/benchmark/generated/imagenet_mobilenetv2/osscar.yaml
+configs/benchmark/generated/imagenet_mobilenetv2/mash_medoid_empirical_cylinder.yaml
+configs/benchmark/generated/imagenet_mobilenetv2/mash_medoid_empirical_delta_f.yaml

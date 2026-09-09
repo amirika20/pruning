@@ -1,0 +1,5 @@
+configs/benchmark/generated/imagenet_resnet18/random.yaml
+configs/benchmark/generated/imagenet_resnet18/magnitude_mass.yaml
+configs/benchmark/generated/imagenet_resnet18/osscar.yaml
+configs/benchmark/generated/imagenet_resnet18/mash_medoid_empirical_cylinder.yaml
+configs/benchmark/generated/imagenet_resnet18/mash_medoid_empirical_delta_f.yaml

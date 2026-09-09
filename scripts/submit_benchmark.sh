@@ -48,9 +48,20 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 case "$TIER" in
-    ""|headline|ablation) ;;
-    *) echo "--tier must be headline or ablation" >&2; exit 1 ;;
+    ""|headline|ablation|scale) ;;
+    *) echo "--tier must be headline, ablation or scale" >&2; exit 1 ;;
 esac
+if [[ "$TIER" == scale ]]; then
+    # The scale tier is NOT submitted as one class-wide array: its cells are
+    # hours to days each and are budgeted model by model and seed by seed
+    # against the wall clock (studies/SUBMIT_NEXT.md, "Scale tier"). Submit the
+    # per-model manifests the generator writes, e.g.
+    #   sbatch --array=1-N scripts/slurm_large.sh configs/benchmark/manifest_scale_imagenet_resnet18.txt
+    #   sbatch --export=ALL,SEED=0 scripts/slurm_large.sh configs/benchmark/manifest_scale_wikitext_opt1.3b.txt
+    echo "--tier scale is submitted per model; see studies/SUBMIT_NEXT.md" >&2
+    ls configs/benchmark/manifest_scale_*.txt 2>/dev/null >&2
+    exit 1
+fi
 SUFFIX="${TIER:+_$TIER}"
 [[ ${#CLASSES[@]} -gt 0 ]] || CLASSES=(small medium large xlarge)
 

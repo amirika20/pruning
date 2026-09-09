@@ -107,6 +107,9 @@ def main() -> None:
     ap.add_argument("--config", nargs="*", help="config file(s) or directory(ies)")
     ap.add_argument("--shard", help="i/n -- run only this strided share")
     ap.add_argument("--grid", type=int, default=16, help="widths per sweep")
+    ap.add_argument("--fractions", type=float, nargs="*", default=None,
+                    help="explicit width grid for every cell; overrides --grid "
+                         "AND any sweep_fractions the configs carry")
     ap.add_argument("--seed", type=int, default=None, help="one seed only")
     ap.add_argument("--out", default=f"{SCRATCH}/results")
     ap.add_argument("--dry-run", action="store_true")
@@ -145,6 +148,8 @@ def main() -> None:
                "--config", str(cfg), "--grid", str(args.grid), "--out", args.out]
         if args.seed is not None:
             cmd += ["--seed", str(args.seed)]
+        if args.fractions:
+            cmd += ["--fractions"] + [str(f) for f in args.fractions]
         # A subprocess per cell: an OOM kill or a segfault then costs one cell
         # instead of the batch, and memory is reclaimed between cells.
         if subprocess.run(cmd, cwd=ROOT).returncode == 0:
