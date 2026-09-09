@@ -98,7 +98,8 @@ import torch.nn as nn
 
 from src.models.registry import PrunableModel
 from src.pruning.registry import (
-    PruneContext, PruneDecision, PruningMethod, register_pruning_method)
+    PruneContext, PruneDecision, PruningMethod, forward_chunked,
+    register_pruning_method)
 # MASH owns the canonical unit extraction (BN folding, the unit-gain gauge) and
 # the rectified-Gaussian Grams; importing keeps one implementation of each.
 from src.pruning.methods.mash import (
@@ -119,11 +120,10 @@ def _preactivations(model: PrunableModel, layer_idx: int,
     grabbed: list[torch.Tensor] = []
     h = target.register_forward_hook(lambda m, i, o: grabbed.append(o.detach()))
     try:
-        with torch.no_grad():
-            model(x)
+        forward_chunked(model, x)      # chunked: see registry.calib_chunk
     finally:
         h.remove()
-    z = grabbed[0]
+    z = torch.cat(grabbed, dim=0)
     if z.dim() == 4:                                  # [N, C, H, W] -> [N*H*W, C]
         z = z.permute(0, 2, 3, 1).reshape(-1, z.shape[1])
     return z.reshape(-1, z.shape[-1]).double().cpu().numpy()

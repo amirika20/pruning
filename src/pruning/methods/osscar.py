@@ -54,7 +54,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from src.models.registry import PrunableModel
-from src.pruning.registry import PruneContext, PruneDecision, PruningMethod, register_pruning_method
+from src.pruning.registry import (
+    PruneContext, PruneDecision, PruningMethod, calib_chunk, forward_chunked,
+    register_pruning_method)
 
 
 def _group_rows(n_units: int, kk: int, device) -> torch.Tensor:
@@ -207,9 +209,11 @@ class OSSCAR(PruningMethod):
 
         handle = consumer.register_forward_pre_hook(hook)
         model.eval()
-        with torch.no_grad():
-            for chunk in ctx.train_inputs.split(self.chunk_size):
-                model(chunk)
+        # chunk_size is a ceiling: 4096 rows is fine for images, but for OPT
+        # it is the whole calibration set in one forward, which OOMs at 1.3b
+        # on the logits alone (see registry.calib_chunk).
+        forward_chunked(model, ctx.train_inputs,
+                        min(self.chunk_size, calib_chunk(ctx.train_inputs)))
         handle.remove()
         return XtX
 

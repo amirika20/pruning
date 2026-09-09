@@ -107,7 +107,8 @@ from scipy.special import ndtr, owens_t
 
 from src.models.registry import PrunableModel
 from src.pruning.registry import (
-    PruneContext, PruneDecision, PruningMethod, register_pruning_method)
+    PruneContext, PruneDecision, PruningMethod, forward_chunked,
+    register_pruning_method)
 
 _SQRT2PI = np.sqrt(2.0 * np.pi)
 _EPS_C = 1e-9        # |corr| beyond 1 - _EPS_C uses the degenerate branches
@@ -949,11 +950,12 @@ def _layer_inputs(model: PrunableModel, layer_idx: int, x: torch.Tensor,
     grabbed: list[torch.Tensor] = []
     h = layer.register_forward_hook(lambda m, inp, out: grabbed.append(inp[0].detach()))
     try:
-        with torch.no_grad():
-            model(x)
+        # Chunked: one forward of all 128 OPT-1.3b calibration sequences
+        # allocated 12 GiB of logits and OOMed a 40GB A100 (see calib_chunk).
+        forward_chunked(model, x)
     finally:
         h.remove()
-    z = grabbed[0]
+    z = torch.cat(grabbed, dim=0)
     if isinstance(layer, nn.Conv2d):
         # [N, d, L] with d = C_in*kH*kW in channel-major order, matching
         # conv.weight.reshape(C_out, -1)

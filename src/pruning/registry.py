@@ -25,6 +25,37 @@ import torch
 from src.data.registry import DatasetBundle
 from src.models.registry import MergeOp, PrunableModel
 
+
+def calib_chunk(x: torch.Tensor) -> int:
+    """How many calibration rows to forward at once.
+
+    A single forward of the whole calibration set is what every hook-based
+    collector used to do, and on OPT-1.3b it OOMed a 40GB card: 128 sequences
+    x 512 tokens x a 50k vocabulary of fp32 logits is 12.3 GiB for the lm_head
+    output alone, before the activations behind it. Token-id inputs (integer
+    dtype) therefore go 8 rows at a time; dense inputs (images, features) keep
+    a large chunk. PRUNING_CALIB_CHUNK overrides both.
+    """
+    import os
+    env = os.environ.get("PRUNING_CALIB_CHUNK")
+    if env:
+        return max(1, int(env))
+    return 8 if not torch.is_floating_point(x) else 512
+
+
+def forward_chunked(model: torch.nn.Module, x: torch.Tensor,
+                    chunk: int | None = None) -> None:
+    """Run `model` over `x` in chunks under no_grad, discarding the outputs.
+
+    For collectors that read a layer through a forward hook: the hook sees
+    every row exactly once, the model's output is never materialised for the
+    whole set, and peak memory is set by the chunk rather than by N.
+    """
+    chunk = chunk or calib_chunk(x)
+    with torch.no_grad():
+        for part in x.split(chunk):
+            model(part)
+
 PRUNING_METHOD_REGISTRY: dict[str, type["PruningMethod"]] = {}
 
 
