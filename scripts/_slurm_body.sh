@@ -180,6 +180,10 @@ fi
 # HF_HUB_OFFLINE makes a cold cache fail loudly here instead of hanging on a
 # blocked connection. Set HF_HUB_OFFLINE=0 to allow in-job downloads.
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+# Several processes share one card under PARALLEL; each keeps its own caching
+# allocator, so fragmentation in one starves the others. Expandable segments
+# let a process hand memory back instead of holding reserved-but-unused blocks.
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 export TOKENIZERS_PARALLELISM=false
 # torch-only: stop transformers probing the TensorFlow/Flax backends, which
 # costs seconds of startup per cell and buries the log in absl/oneDNN notices.

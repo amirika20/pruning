@@ -280,8 +280,9 @@ efficiency report on the OPT-1.3b probe (5% GPU utilization, 7% of 128G):
 2. **PARALLEL cells per GPU.** `PARALLEL=k` in the job body runs k cells of a
    task's share side by side on one GPU (each its own process, finer strided
    sub-shards), so the card is busy while the others plan or load. Pair it
-   with `--cpus-per-task=2k`. k=3 fits OPT-1.3b, OPT-350m and the CIFAR
-   ResNets. NOT ImageNet: each ImageNet process holds the 20000-image
+   with `--cpus-per-task=2k`. k=3 fits OPT-350m and the CIFAR ResNets; OPT-1.3b
+   takes k=2 -- at k=3 the two non-MASH cells sat at 11-13 GiB of GPU memory
+   each beside the MASH cell and the third OOMed at 39.5 GiB (stage 1, task 1). NOT ImageNet: each ImageNet process holds the 20000-image
    calibration set as float32 (12 GB host, 10.8 GB of it copied to the GPU),
    so three of them blew the 48G host request and were SIGKILLed with no
    traceback (the 2026-09-10 retry and resnet18 repair arrays). ImageNet runs
@@ -308,12 +309,12 @@ for m in imagenet_resnet18 imagenet_resnet50 imagenet_mobilenetv2 imagenet_vit_b
   sbatch --array=1-$n scripts/slurm_large.sh configs/benchmark/manifest_repair_$m.txt
 done
 # OPT-1.3b, seed 0. Stage 1 = the 4 planning arms + random/magnitude/osscar
-# (7 cells, 3 per GPU, 3 tasks); stage 2 = the 11 repair variants, 6 of which
+# (7 cells, 2 per GPU, 4 tasks); stage 2 = the 11 repair variants, 6 of which
 # reuse stage 1's plans, held until stage 1 has finished. Seeds 1-2: repeat
 # with SEED=1,2.
-j=$(sbatch --parsable --export=ALL,SEED=0,PARALLEL=3 --cpus-per-task=6 --array=1-3 \
+j=$(sbatch --parsable --export=ALL,SEED=0,PARALLEL=2 --cpus-per-task=4 --array=1-4 \
       scripts/slurm_large.sh configs/benchmark/manifest_repair_wikitext_opt1.3b_stage1.txt)
-sbatch --dependency=afterany:$j --export=ALL,SEED=0,PARALLEL=3 --cpus-per-task=6 --array=1-4 \
+sbatch --dependency=afterany:$j --export=ALL,SEED=0,PARALLEL=2 --cpus-per-task=4 --array=1-6 \
       scripts/slurm_large.sh configs/benchmark/manifest_repair_wikitext_opt1.3b_stage2.txt
 ```
 

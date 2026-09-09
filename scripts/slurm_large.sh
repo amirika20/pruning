@@ -10,6 +10,10 @@
 #SBATCH --partition=kempner
 #SBATCH --account=kempner_pehlevan_lab
 #SBATCH --requeue
+# holygpu8a19102's GPU has answered every probe with "busy or unavailable"
+# since 2026-09-08 and took 13 tasks across three submissions that forgot
+# --exclude. Pinned here until FASRC clears it; a submit-line --exclude adds.
+#SBATCH --exclude=holygpu8a19102
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=akazeminia@g.harvard.edu
 #
