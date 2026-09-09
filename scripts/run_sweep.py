@@ -54,6 +54,7 @@ from src.data import build_dataset
 from src.experiments.sweep import (LM_EVAL_BATCH, format_sweep, prune_at_fraction,
                                    sweep_report, sweep_widths)
 from src.models import build_model
+from src.pruning.registry import build_pruning_method
 from src.reproducibility import run_fingerprint, seed_everything
 from src.training.trainer import evaluate, train
 
@@ -72,6 +73,41 @@ def _accuracy_of(model, bundle, device, split="val"):
     else:
         _, loader = bundle.loaders(batch_size=None)
     return evaluate(model, loader, bundle.task)
+
+
+def find_reusable_plans(out_root: Path, cell_name: str, seed: int, method,
+                        widths: list[int]):
+    """(plans, source) from a sibling cell's dendrogram.json, or (None, None).
+
+    A sibling is `<model>__<other arm>/seed_<s>/dendrogram.json` under the same
+    output root, same model prefix and seed, whose recorded plan_key equals
+    this arm's and whose layer widths match. The key is the method's own
+    statement of what its dendrogram depends on (see mash._MashBase.plan_key),
+    so a match is exact reuse, not an approximation.
+    """
+    try:
+        probe = build_pruning_method(method.kind, **method.params)
+    except Exception:                                  # noqa: BLE001
+        return None, None
+    if not hasattr(probe, "plan_key"):
+        return None, None
+    key = probe.plan_key()
+    model_prefix = cell_name.split("__")[0]
+    from src.pruning.methods.mash import MashPlan
+    for cand in sorted(out_root.glob(f"{model_prefix}__*/seed_{seed}/dendrogram.json")):
+        if cand.parent.parent.name == cell_name:
+            continue
+        try:
+            rec = json.loads(cand.read_text())
+        except (OSError, ValueError):
+            continue
+        if rec.get("plan_key") != key or list(rec.get("widths", [])) != list(widths):
+            continue
+        layers = rec.get("layers") or []
+        if sorted(int(l["layer"]) for l in layers) != list(range(len(widths))):
+            continue
+        return {int(l["layer"]): MashPlan.from_record(l) for l in layers}, cand
+    return None, None
 
 
 def load_model(config: ExperimentConfig, seed: int, device: torch.device):
@@ -110,6 +146,9 @@ def main() -> None:
     ap.add_argument("--fractions", type=float, nargs="*", default=None,
                     help="explicit grid, overrides --grid")
     ap.add_argument("--out", default=None, help="override output_root")
+    ap.add_argument("--no-plan-reuse", action="store_true",
+                    help="always run the planning pass, even when a sibling cell "
+                         "of this model/seed has written a matching dendrogram.json")
     ap.add_argument("--allow-untrained", action="store_true",
                     help="sweep even when the dense model is at chance accuracy "
                          "(the capacity it reports is meaningless -- see below)")
@@ -197,11 +236,23 @@ def main() -> None:
         logging.info(f"seed {seed}: {len(widths)} prunable layers, "
                      f"{sum(widths)} units, fingerprint trained={fp.get('trained')}")
 
+        # PLAN REUSE. Arms that differ only in how they repair (none / empirical
+        # / ridge) cut the same dendrogram, and a sibling cell of this model
+        # and seed may already have written it. Reuse it when its plan_key
+        # matches ours exactly; otherwise plan. --no-plan-reuse forces a plan.
+        preplanned, plan_src = (None, None)
+        if not args.no_plan_reuse:
+            preplanned, plan_src = find_reusable_plans(root.parent, config.name,
+                                                       seed, method, widths)
+        if plan_src:
+            logging.info(f"  reusing the dendrogram of {plan_src}")
         curve = sweep_widths(model, bundle, method.kind, method.params,
                              fractions=fractions, device=device,
-                             eval_split=config.eval_split,
+                             eval_split=config.eval_split, preplanned=preplanned,
                              seed=seed, name=config.name, arm=method.kind)
         rep = sweep_report(curve)
+        if plan_src:
+            rep["plan_reused_from"] = str(plan_src)
         rep.update(dense_accuracy=dense_acc, dense_loss=dense_loss,
                    require_accuracy=config.require_accuracy,
                    cell=config.name, arm=method.kind, arm_params=method.params,
@@ -226,7 +277,8 @@ def main() -> None:
         if plans:
             (out / "dendrogram.json").write_text(json.dumps(
                 {"cell": config.name, "arm": method.kind, "seed": seed,
-                 "widths": widths, "layers": plans}))
+                 "widths": widths, "plan_key": curve.attrs.get("plan_key"),
+                 "layers": plans}))
         (out / "report.json").write_text(json.dumps(rep, indent=2, default=str))
         logging.info("\n" + format_sweep({f"{config.name} s{seed}": rep}))
 

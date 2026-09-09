@@ -267,30 +267,57 @@ and `mash_{medoid,merge}_empirical_delta_f` overlap the scale/ablation tiers:
 finished seed dirs are reused by the plots, so skip those lines when a cell is
 already on disk (`ls outputs/benchmark/<cell>/seed_*`).
 
-**Cost.** The Grams now form on the GPU, so a MASH cell is its planning pass
-plus seconds per width. Per seed: CIFAR ResNets and ImageNet convs minutes per
-arm; OPT-125m ~15 min per MASH arm; OPT-350m ~1.1 h per MASH arm, ~0.5 h
-OSSCAR; OPT-1.3b ~10 h per MASH arm (10 arms), ~3.5 h OSSCAR (2 arms). At three
-seeds OPT-1.3b alone is ~330 GPU-h; with `SEED=0` only it is ~110. Everything
-else together is under 60 GPU-h.
+**Cost, and how it is kept down.** Three things changed after the cluster's
+efficiency report on the OPT-1.3b probe (5% GPU utilization, 7% of 128G):
+
+1. **Plan reuse.** A MASH cell's cost is its planning pass (10 h at 1.3b, CPU
+   only, GPU idle). Arms that differ only in repair -- none / empirical /
+   ridge -- cut the same dendrogram, so `run_sweep` now looks for a sibling
+   cell's `dendrogram.json` with an identical `plan_key` (score, measure,
+   dictionary, gauge, radius, n_calib) and reuses it; the report records
+   `plan_reused_from`. That turns the 10 MASH plans at 1.3b into 4. It only
+   works if the planning arms FINISH FIRST, hence the two stages below.
+2. **PARALLEL cells per GPU.** `PARALLEL=k` in the job body runs k cells of a
+   task's share side by side on one GPU (each its own process, finer strided
+   sub-shards), so the card is busy while the others plan or load. Pair it
+   with `--cpus-per-task=2k`. k=3 fits any ImageNet model or OPT-1.3b on a
+   40GB card.
+3. **Memory** requests are right-sized: medium 32G, large 48G (6.7b: pass
+   `--mem=96G`).
+
+Per seed, after these: CIFAR ResNets and ImageNet convs minutes per arm;
+OPT-125m ~15 min per MASH plan; OPT-350m ~1.1 h per MASH plan, ~0.5 h OSSCAR;
+OPT-1.3b ~10 h per MASH plan (4 plans), ~3.5 h OSSCAR (2 arms). OPT-1.3b is
+~55 GPU-h per seed with reuse and PARALLEL=3 against ~110 without. Everything
+else together is under 40 GPU-h.
 
 ```bash
-# CIFAR + OPT-125m/350m: medium class, one task per cell, three seeds each
+# CIFAR + OPT-125m/350m: medium class, 3 cells per GPU, ~4 tasks per model
 for m in cifar10_resnet20 cifar10_resnet56 wikitext_opt125m wikitext_opt350m; do
   n=$(wc -l < configs/benchmark/manifest_repair_$m.txt)
-  sbatch --array=1-$n scripts/slurm_medium.sh configs/benchmark/manifest_repair_$m.txt
+  sbatch --export=ALL,PARALLEL=3 --cpus-per-task=6 --array=1-$(( (n + 2) / 3 )) \
+         scripts/slurm_medium.sh configs/benchmark/manifest_repair_$m.txt
 done
-# ImageNet: large class, one task per cell
+# ImageNet: large class, 3 cells per GPU
 for m in imagenet_resnet18 imagenet_resnet50 imagenet_mobilenetv2 imagenet_vit_b16; do
   n=$(wc -l < configs/benchmark/manifest_repair_$m.txt)
-  sbatch --array=1-$n scripts/slurm_large.sh configs/benchmark/manifest_repair_$m.txt
+  sbatch --export=ALL,PARALLEL=3 --cpus-per-task=6 --array=1-$(( (n + 2) / 3 )) \
+         scripts/slurm_large.sh configs/benchmark/manifest_repair_$m.txt
 done
-# OPT-1.3b: split by seed; start with seed 0 and add seeds 1-2 if the budget allows
-sbatch --export=ALL,SEED=0 --array=1-18 scripts/slurm_large.sh configs/benchmark/manifest_repair_wikitext_opt1.3b.txt
+# OPT-1.3b, seed 0. Stage 1 = the 4 planning arms + random/magnitude/osscar
+# (7 cells, 3 per GPU, 3 tasks); stage 2 = the 11 repair variants, 6 of which
+# reuse stage 1's plans, held until stage 1 has finished. Seeds 1-2: repeat
+# with SEED=1,2.
+j=$(sbatch --parsable --export=ALL,SEED=0,PARALLEL=3 --cpus-per-task=6 --array=1-3 \
+      scripts/slurm_large.sh configs/benchmark/manifest_repair_wikitext_opt1.3b_stage1.txt)
+sbatch --dependency=afterany:$j --export=ALL,SEED=0,PARALLEL=3 --cpus-per-task=6 --array=1-4 \
+      scripts/slurm_large.sh configs/benchmark/manifest_repair_wikitext_opt1.3b_stage2.txt
 ```
 
-Add `--exclude=$(sort -u logs/bad_nodes.txt | paste -sd,)` if that file is
-non-empty. Figures: `python studies/paper/figs/make_repair_figures.py` writes
-`fig_repair_effect`, `fig_repair_ridge` and `fig_repair_measure` from whatever
-cells exist. The best configuration from these then goes to OPT-2.7b/6.7b as
-§4 describes.
+Stage 1 of OPT-1.3b is a superset of §4 step 4's MASH delta_f arms (the two
+cylinder arms are the only scale-tier cells it lacks), so submit §4 step 4 as
+stage 1's sibling or skip it. Add `--exclude=$(sort -u logs/bad_nodes.txt |
+paste -sd,)` if that file is non-empty. Figures:
+`python studies/paper/figs/make_repair_figures.py` writes `fig_repair_effect`,
+`fig_repair_ridge` and `fig_repair_measure` from whatever cells exist. The
+best configuration from these then goes to OPT-2.7b/6.7b as §4 describes.

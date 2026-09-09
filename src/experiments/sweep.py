@@ -132,12 +132,18 @@ def sweep_widths(
     eval_split: str = "val",
     n_calib: int | None = None,
     evaluate_fn: Callable[[PrunableModel], dict] | None = None,
+    preplanned: dict[int, Any] | None = None,
     **meta: Any,
 ) -> pd.DataFrame:
     """One row per target fraction: width, accuracy, loss and timings.
 
     `evaluate_fn` overrides the default validation evaluation, for protocols that
     need something else (perplexity, a held-out split, a task subset).
+    `preplanned` supplies the per-layer plans (e.g. MashPlan.from_record of a
+    dendrogram.json written by an arm with the same plan_key) and skips the
+    planning pass; plan_seconds is then 0 and the report says where they came
+    from. Arms that differ only in repair share a plan, and at OPT-1.3b the
+    plan is ~10 h of CPU per seed while the GPU idles.
     """
     params = dict(params or {})
     device = device or torch.device("cpu")
@@ -168,14 +174,22 @@ def sweep_widths(
     probe = None
     if hasattr(cls, "plan") and hasattr(cls, "emit_at"):
         probe = build_pruning_method(kind, **params)
-        t0 = time.perf_counter()
-        for li in range(model.n_prunable_layers()):
-            ctx = PruneContext(train_inputs=train_inputs, bundle=bundle,
-                               device=device)
-            plans[li] = probe.plan(model, li, ctx)
-        plan_seconds = time.perf_counter() - t0
-        logging.info(f"  [{kind}] planned {len(plans)} layer(s) in "
-                     f"{plan_seconds:.2f}s -- reused at every width")
+        if preplanned is not None:
+            if set(preplanned) != set(range(model.n_prunable_layers())):
+                raise ValueError("preplanned must cover every prunable layer; "
+                                 f"got layers {sorted(preplanned)}")
+            plans = dict(preplanned)
+            logging.info(f"  [{kind}] using {len(plans)} preplanned layer(s); "
+                         "planning pass skipped")
+        else:
+            t0 = time.perf_counter()
+            for li in range(model.n_prunable_layers()):
+                ctx = PruneContext(train_inputs=train_inputs, bundle=bundle,
+                                   device=device)
+                plans[li] = probe.plan(model, li, ctx)
+            plan_seconds = time.perf_counter() - t0
+            logging.info(f"  [{kind}] planned {len(plans)} layer(s) in "
+                         f"{plan_seconds:.2f}s -- reused at every width")
 
     removals: dict[float, dict[int, list[int]]] = {}
     for f in fractions:
@@ -237,6 +251,8 @@ def sweep_widths(
     # big models the pass it records is hours per layer.
     df.attrs["plans"] = [p.to_record() for p in plans.values()
                          if hasattr(p, "to_record")]
+    df.attrs["plan_key"] = (probe.plan_key()
+                            if probe is not None and hasattr(probe, "plan_key") else None)
     return df
 
 

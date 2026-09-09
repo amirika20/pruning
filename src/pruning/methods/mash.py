@@ -1084,6 +1084,30 @@ class MashPlan:
         return max(0, min(int(round(fraction * (self.n_mergeable - 1))),
                           self.max_merges))
 
+    @classmethod
+    def from_record(cls, rec: dict) -> "MashPlan":
+        """Inverse of to_record: rebuild a cut-able plan from dendrogram.json.
+
+        The record stores layer indices; the plan works in sub-indices (positions
+        in `mergeable`), so the pairs and the per-step `removed` are mapped back.
+        Only the fields a cut needs are restored (cost, certificate) -- the
+        engine's other per-step diagnostics are not, and nothing reads them.
+        """
+        idx = [int(i) for i in rec["mergeable"]]
+        pos = {u: i for i, u in enumerate(idx)}
+        pairs, recs = [], []
+        for st in rec["steps"]:
+            s, r = pos[int(st["survivor"])], pos[int(st["removed"])]
+            pairs.append((s, r))
+            row = {"survivor": s, "removed": r, "cost": float(st.get("cost", float("nan")))}
+            if "certificate" in st:
+                row["certificate"] = float(st["certificate"])
+            recs.append(row)
+        mass = rec.get("mass")
+        return cls(layer_idx=int(rec["layer"]), pairs=pairs, recs=recs,
+                   idx_map=np.asarray(idx, dtype=int), n_mergeable=int(rec["n_mergeable"]),
+                   mass=None if mass is None else np.asarray(mass, dtype=float))
+
     def to_record(self) -> dict:
         """The dendrogram as plain JSON, in the LAYER's own unit indices.
 
@@ -1149,6 +1173,21 @@ class _MashBase(PruningMethod):
         self.ridge = float(ridge)
         if self.repair == "none" and self.dictionary == "merge":
             raise ValueError("repair='none' needs dictionary='medoid'")
+
+    def plan_key(self) -> dict:
+        """Everything the DENDROGRAM depends on, and nothing it does not.
+
+        Two arms with equal keys plan identically, so one arm's dendrogram.json
+        serves the other: the repair, the ridge and bias_fix only enter at
+        realization. `dictionary` is included because the exact_damage score
+        reads the survivor's response through it; `measure`/`dictionary` are
+        the CONFIGURED values (None = per-layer auto), which is what makes two
+        configs comparable before any layer has been seen.
+        """
+        return {"kind": "mash", "score": self.score, "dictionary": self.dictionary,
+                "measure": self.measure, "gauge_correct": self.gauge_correct,
+                "radius": self.radius, "n_calib": self.n_calib,
+                "max_rows": self.max_rows}
 
     # -- setup ------------------------------------------------------------
 

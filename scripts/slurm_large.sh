@@ -5,7 +5,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=128G
+#SBATCH --mem=48G
 #SBATCH --time=16:00:00
 #SBATCH --partition=kempner
 #SBATCH --account=kempner_pehlevan_lab
@@ -24,6 +24,11 @@
 # planning is scalar-bound. Two cores = the python main thread plus the CUDA
 # driver/allocator threads; _slurm_body.sh pins OMP/MKL to the same count.
 # Check with `jobstats <jobid>` before asking for more.
+#
+# --mem=48G: the OPT-1.3b probe peaked at ~9 GB of host memory (7% of the
+# old 128G request, per the cluster's efficiency report). 48G covers three
+# parallel cells of any ImageNet model or OPT-1.3b. OPT-6.7b loads 13 GB of
+# fp16 weights through host memory: submit it with --mem=96G.
 #
 # Override anything without editing this file:
 #   sbatch --time=02:00:00 --mem=16G --array=1-10 scripts/slurm_large.sh <manifest>

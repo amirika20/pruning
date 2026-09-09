@@ -181,16 +181,6 @@ fi
 # blocked connection. Set HF_HUB_OFFLINE=0 to allow in-job downloads.
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export TOKENIZERS_PARALLELISM=false
-# Host threads = cores allocated. Job Defense Shield measured every task of the
-# 4- and 8-core runs at exactly one core busy (CPU-Util 25% of 4, i.e. one
-# thread): the pipeline is GPU-side torch with no DataLoader workers, and the
-# numpy/scipy planning is scalar-bound, not BLAS-bound. So the job scripts now
-# ask for 2 cores (main thread + CUDA driver/allocator threads), and these pin
-# every BLAS/OpenMP pool to that count so a library cannot oversubscribe it
-# either. Raise --cpus-per-task only after `jobstats` shows the second core used.
-_NT="${SLURM_CPUS_PER_TASK:-2}"
-export OMP_NUM_THREADS="$_NT" MKL_NUM_THREADS="$_NT" OPENBLAS_NUM_THREADS="$_NT" \
-       NUMEXPR_NUM_THREADS="$_NT"
 # torch-only: stop transformers probing the TensorFlow/Flax backends, which
 # costs seconds of startup per cell and buries the log in absl/oneDNN notices.
 export TRANSFORMERS_NO_TF=1 TRANSFORMERS_NO_FLAX=1 USE_TF=0 USE_FLAX=0
@@ -208,11 +198,44 @@ ARGS=(--grid "$GRID" --out "$RESULTS_ROOT")
 # entries record their own grid in suite.yaml, and that is what the tables cite.
 [[ -n "${FRACTIONS:-}" ]] && ARGS+=(--fractions $FRACTIONS)
 
+# PARALLEL CELLS PER GPU. A MASH cell spends its planning pass in host NumPy
+# with the GPU idle (the OPT-1.3b probe: 10 h of plan, 2.5 h of GPU work, and
+# the cluster's report read 5% GPU utilization), and the cheap arms spend most
+# of their minutes loading weights and data. PARALLEL=k runs k cells of this
+# task's share side by side on the one GPU, each as its own run_manifest
+# sub-shard, so the card is busy while the others plan. Give the task
+# 2*PARALLEL cores (sbatch --cpus-per-task) and enough host memory for k
+# copies of the model; on a 40GB card k=3 fits OPT-1.3b (5 GB each) and every
+# ImageNet model. Default 1 = the old behaviour.
+PARALLEL="${PARALLEL:-1}"
+_NT=$(( ${SLURM_CPUS_PER_TASK:-2} / PARALLEL )); [[ "$_NT" -lt 1 ]] && _NT=1
+export OMP_NUM_THREADS="$_NT" MKL_NUM_THREADS="$_NT" OPENBLAS_NUM_THREADS="$_NT" \
+       NUMEXPR_NUM_THREADS="$_NT"
+
 if [[ "$TARGET" == *.yaml ]]; then
-    ARGS+=(--config "$TARGET")
-else
-    ARGS+=(--manifest "$TARGET"
-           --shard "${SLURM_ARRAY_TASK_ID:-1}/${SLURM_ARRAY_TASK_COUNT:-1}")
+    python scripts/run_manifest.py "${ARGS[@]}" --config "$TARGET"
+    exit $?
 fi
 
-python scripts/run_manifest.py "${ARGS[@]}"
+TASK="${SLURM_ARRAY_TASK_ID:-1}"; NTASK="${SLURM_ARRAY_TASK_COUNT:-1}"
+if [[ "$PARALLEL" -le 1 ]]; then
+    python scripts/run_manifest.py "${ARGS[@]}" --manifest "$TARGET" --shard "$TASK/$NTASK"
+    exit $?
+fi
+# sub-shard p of this task = global shard ((TASK-1)*PARALLEL + p) of NTASK*PARALLEL:
+# the same strided split, just finer, so no cell is run twice or skipped.
+pids=(); rc=0
+for p in $(seq 1 "$PARALLEL"); do
+    g=$(( (TASK - 1) * PARALLEL + p ))
+    python scripts/run_manifest.py "${ARGS[@]}" --manifest "$TARGET" \
+           --shard "$g/$(( NTASK * PARALLEL ))" \
+           > "logs/$(basename "${TARGET%.*}")_${STAMP}_p${p}.log" 2>&1 &
+    pids+=($!)
+done
+for i in "${!pids[@]}"; do
+    if ! wait "${pids[$i]}"; then
+        echo "sub-shard $((i + 1))/$PARALLEL failed -- see its _p$((i + 1)).log" >&2
+        rc=1
+    fi
+done
+exit $rc

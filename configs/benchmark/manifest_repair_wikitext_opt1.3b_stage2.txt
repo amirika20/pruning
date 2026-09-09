@@ -1,0 +1,11 @@
+configs/benchmark/generated/wikitext_opt1.3b/random_empirical.yaml
+configs/benchmark/generated/wikitext_opt1.3b/random_ridge.yaml
+configs/benchmark/generated/wikitext_opt1.3b/magnitude_mass_empirical.yaml
+configs/benchmark/generated/wikitext_opt1.3b/magnitude_mass_ridge.yaml
+configs/benchmark/generated/wikitext_opt1.3b/osscar_norepair.yaml
+configs/benchmark/generated/wikitext_opt1.3b/mash_medoid_none_delta_f.yaml
+configs/benchmark/generated/wikitext_opt1.3b/mash_sampled_medoid_none_delta_f.yaml
+configs/benchmark/generated/wikitext_opt1.3b/mash_ridge_merge_empirical_delta_f.yaml
+configs/benchmark/generated/wikitext_opt1.3b/mash_ridge_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/wikitext_opt1.3b/mash_ridge_sampled_merge_empirical_delta_f.yaml
+configs/benchmark/generated/wikitext_opt1.3b/mash_ridge_sampled_medoid_empirical_delta_f.yaml
