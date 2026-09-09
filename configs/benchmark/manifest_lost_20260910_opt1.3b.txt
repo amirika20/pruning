@@ -1,0 +1,2 @@
+configs/benchmark/generated/wikitext_opt1.3b/magnitude_mass.yaml
+configs/benchmark/generated/wikitext_opt1.3b/osscar.yaml
