@@ -96,6 +96,7 @@ for the numerical self-tests.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -765,13 +766,10 @@ def realize(units: Units, ok: np.ndarray, clusters: list[list[int]],
     if repair == "empirical":
         if Z is None:
             raise ValueError("repair='empirical' needs the layer inputs Z")
-        Phi_orig = np.maximum(Z @ units.u.T - units.rho[None, :], 0.0)
-        Phi_keep = np.maximum(Z @ rows.T + biases[None, :], 0.0)
-        N = len(Z)
-        G = Phi_keep.T @ Phi_keep / N
-        B = Phi_keep.T @ (Phi_orig * units.alpha[None, :]) / N
-        Eh = (Phi_orig * units.alpha[None, :]).mean(axis=0)
-        Ehat = Phi_keep.mean(axis=0)
+        # G = Phi_keep^T Phi_keep / N, B = Phi_keep^T (Phi_orig * alpha) / N,
+        # Ehat = mean Phi_keep, Eh = mean (Phi_orig * alpha) -- on the GPU.
+        G, B, Ehat, Eh = _relu_grams(Z, rows, biases, units.u, -units.rho,
+                                     scale_b=units.alpha)
     else:
         if mu is None or Sigma is None:
             raise ValueError(f"repair={repair!r} needs calibration moments")
@@ -875,12 +873,10 @@ def repair_deletion(model: PrunableModel, layer_idx: int, x: torch.Tensor,
 
     Z = _layer_inputs(model, layer_idx, x, max_rows=max_rows)
     if repair in ("empirical", "bias_only"):
-        Phi = np.maximum(Z @ units.u.T - units.rho[None, :], 0.0)
-        N = len(Z)
-        G = Phi[:, keep].T @ Phi[:, keep] / N
-        g1 = Phi[:, keep].mean(axis=0)
-        B = Phi[:, keep].T @ Phi[:, removed] / N
-        b1 = Phi[:, removed].mean(axis=0)
+        # G = Phi_keep^T Phi_keep / N, B = Phi_keep^T Phi_removed / N and the
+        # two column means, formed on the GPU (see _relu_grams).
+        G, B, g1, b1 = _relu_grams(Z, units.u[keep], -units.rho[keep],
+                                   units.u[removed], -units.rho[removed])
     else:
         mu, Sigma = Z.mean(axis=0), np.atleast_2d(np.cov(Z.T))
         mk = UnitMoments(units.u[keep], units.rho[keep], mu, Sigma)
@@ -932,6 +928,60 @@ def consumer_has_bias(model: PrunableModel, layer_idx: int) -> bool:
     except NotImplementedError:
         return False
     return getattr(module, "bias", None) is not None
+
+
+def _gram_device() -> torch.device:
+    """Where the sample Grams are formed. MASH_GRAM_DEVICE overrides; the
+    default is the GPU when there is one, else the CPU (still via torch)."""
+    env = os.environ.get("MASH_GRAM_DEVICE")
+    if env:
+        return torch.device(env)
+    return torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
+
+def _relu_grams(Z: np.ndarray, rows_a: np.ndarray, bias_a: np.ndarray,
+                rows_b: np.ndarray, bias_b: np.ndarray,
+                scale_b: np.ndarray | None = None, chunk: int = 4096
+                ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Sample-average Grams of two rectified unit sets over the inputs Z.
+
+        Phi_a = relu(Z rows_a^T + bias_a)            [N, K]
+        Phi_b = relu(Z rows_b^T + bias_b) * scale_b  [N, H]
+        G  = Phi_a^T Phi_a / N        B  = Phi_a^T Phi_b / N
+        ea = mean_n Phi_a             eb = mean_n Phi_b
+
+    The SAME expressions the empirical repairs wrote in NumPy, evaluated in
+    float64 in torch on `_gram_device()`. This is a speed change only: on
+    OPT-350m the two 20000 x 4096 activation matrices and their 4096 x 4096
+    Grams took ~10 s per layer in host NumPy on the job's two cores -- 300 of
+    the 310 s each width cost, against 7 s for the sum rule -- and the same
+    step was 887 s per width at OPT-1.3b. Rows of Z stream through in chunks so
+    no N x H matrix is ever resident; only the K x K and K x H results return.
+    """
+    dev = _gram_device()
+    f64 = dict(dtype=torch.float64, device=dev)
+    Zt = torch.as_tensor(np.ascontiguousarray(Z), **f64)
+    Ra, ba = torch.as_tensor(rows_a, **f64), torch.as_tensor(bias_a, **f64)
+    Rb, bb = torch.as_tensor(rows_b, **f64), torch.as_tensor(bias_b, **f64)
+    sb = None if scale_b is None else torch.as_tensor(scale_b, **f64)
+    K, H = Ra.shape[0], Rb.shape[0]
+    G = torch.zeros((K, K), **f64)
+    B = torch.zeros((K, H), **f64)
+    ea = torch.zeros(K, **f64)
+    eb = torch.zeros(H, **f64)
+    N = Zt.shape[0]
+    with torch.no_grad():
+        for z in Zt.split(chunk):
+            pa = torch.relu(z @ Ra.T + ba)
+            pb = torch.relu(z @ Rb.T + bb)
+            if sb is not None:
+                pb = pb * sb
+            G.addmm_(pa.T, pa)
+            B.addmm_(pa.T, pb)
+            ea += pa.sum(dim=0)
+            eb += pb.sum(dim=0)
+    out = (G / N, B / N, ea / N, eb / N)
+    return tuple(t.cpu().numpy() for t in out)
 
 
 def _layer_inputs(model: PrunableModel, layer_idx: int, x: torch.Tensor,
