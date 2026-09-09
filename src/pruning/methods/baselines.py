@@ -65,7 +65,7 @@ class _Baseline(PruningMethod):
 
     def __init__(self, n_remove: int = 1, fraction: float | None = None,
                  repair: str = "none", n_calib: int = 128,
-                 max_rows: int = 20000):
+                 max_rows: int = 20000, ridge: float = 1e-8):
         if fraction is not None and not 0.0 <= fraction <= 1.0:
             raise ValueError(f"fraction must be in [0, 1], got {fraction}")
         if repair not in REPAIRS:
@@ -75,6 +75,8 @@ class _Baseline(PruningMethod):
         self.repair = repair
         self.n_calib = int(n_calib)
         self.max_rows = int(max_rows)
+        # relative ridge on the repair's normal equations (see mash._MashBase)
+        self.ridge = float(ridge)
 
     # -- subclasses provide an ORDER; smallest goes first ------------------
 
@@ -100,7 +102,7 @@ class _Baseline(PruningMethod):
 
         C_new, const = repair_deletion(
             model, layer_idx, ctx.train_inputs[: self.n_calib], removed,
-            repair=self.repair, max_rows=self.max_rows)
+            repair=self.repair, max_rows=self.max_rows, ridge=self.ridge)
         dec = PruneDecision(remove=sorted(removed))
         if C_new is not None:
             dec.new_outgoing = torch.from_numpy(

@@ -71,6 +71,10 @@ three-unit fan whose heaviest member sits at the edge).
 
 REPAIR (`repair=`) of the surviving consumer columns:
 
+    none        DELETE: keep each cluster's medoid with its ORIGINAL column
+                and drop the rest. No transfer, no solve -- the selection-only
+                control (medoid dictionary only; a merged hyperplane has no
+                original column to keep)
     sum         emit the accumulated column; no reference to any measure
     projection  per-cluster rank-1 least squares (each column optimal, but
                 clusters stay independent)
@@ -119,7 +123,7 @@ ZERO_NORM = 1e-10
 
 SCORES = ("cylinder", "delta_f", "exact_damage")
 DICTIONARIES = ("merge", "medoid")
-REPAIRS = ("sum", "projection", "kernel", "empirical")
+REPAIRS = ("none", "sum", "projection", "kernel", "empirical")
 
 
 # ── rectified-Gaussian moments ───────────────────────────────────────────────
@@ -716,21 +720,31 @@ def realize(units: Units, ok: np.ndarray, clusters: list[list[int]],
         raise ValueError(f"dictionary must be one of {DICTIONARIES}")
     if repair not in REPAIRS:
         raise ValueError(f"repair must be one of {REPAIRS}")
+    if repair == "none" and dictionary != "medoid":
+        raise ValueError("repair='none' keeps original units, so it needs "
+                         "dictionary='medoid'")
     a, V = units.mass, units.V
     rows, biases, cols, keep = [], [], [], []
+    # The UNREPAIRED column of each survivor: what it carries under repair=none
+    # (medoid: its own effective column) or, for a merged unit that has no
+    # original column, the sum rule's emission. The ridge shrinks toward this.
+    prior: list[np.ndarray] = []
 
     for mem in clusters:
         m = np.array(mem)
         if len(m) == 1 and not ok[m[0]]:          # constant unit: carry as-is
             i = int(m[0])
             rows.append(units.u[i]); biases.append(-units.rho[i])
-            cols.append(units.C[i]); keep.append(i)
+            cols.append(units.C[i]); prior.append(units.C[i]); keep.append(i)
             continue
         w_sum = V[m].sum(axis=0)
         if dictionary == "medoid":
             rep = int(m[np.argmax(a[m])])
-            u_new, rho_new, col = units.u[rep], units.rho[rep], w_sum
-            keep.append(rep)
+            # repair='none': the survivor keeps its own effective column V[rep];
+            # every other rule starts from the cluster's accumulated column.
+            col = V[rep] if repair == "none" else w_sum
+            u_new, rho_new = units.u[rep], units.rho[rep]
+            keep.append(rep); prior.append(V[rep])
         else:
             g = (a[m, None] * units.u[m]).sum(axis=0)
             n = float(np.linalg.norm(g))
@@ -748,17 +762,19 @@ def realize(units: Units, ok: np.ndarray, clusters: list[list[int]],
                 rho_c = float((a[m] * units.rho[m]).sum()) / max(A, TINY)
                 rows.append(np.zeros(units.u.shape[1]))
                 biases.append(-rho_c if gauge_correct else 0.0)
-                cols.append(w_sum); keep.append(int(m[np.argmax(a[m])]))
+                cols.append(w_sum); prior.append(w_sum)
+                keep.append(int(m[np.argmax(a[m])]))
                 continue
             eta = n / A if A > TINY else 1.0
             u_new = g / n
             rho_new = float((a[m] * units.rho[m]).sum()) / n
             col = eta * w_sum if gauge_correct else w_sum
-            keep.append(int(m[np.argmax(a[m])]))
+            keep.append(int(m[np.argmax(a[m])])); prior.append(col)
         rows.append(u_new); biases.append(-rho_new); cols.append(col)
 
     rows = np.array(rows); biases = np.array(biases); cols = np.array(cols)
-    if repair == "sum" and not bias_fix:
+    prior_arr = np.array(prior)
+    if repair == "none" or (repair == "sum" and not bias_fix):
         return rows, biases, cols, keep, None
 
     # Grams: sample averages over the calibration inputs, or analytic under
@@ -789,8 +805,18 @@ def realize(units: Units, ok: np.ndarray, clusters: list[list[int]],
             if G[k, k] > 1e-30:
                 cols[k] = (B[k, m] / G[k, k])[:, None].T @ units.C[m]
     elif repair in ("kernel", "empirical"):
+        # Ridge CENTRED ON THE UNREPAIRED COLUMNS: solve for the correction
+        # to `prior`, so lam -> 0 is the plain least squares and lam -> inf
+        # returns the survivors' own columns (repair=none / the sum rule) --
+        # the same limit OSSCAR's damped target and repair_deletion's transfer
+        # have. A zero-centred ridge would instead drive every column to zero
+        # and make a strong ridge fail for a reason that has nothing to do
+        # with regularization. At the 1e-8 operating value the two agree to
+        # ~1e-8 relative.
         lam = ridge * max(np.trace(G) / max(len(G), 1), 1e-30)
-        cols = np.linalg.solve(G + lam * np.eye(len(G)), B @ units.C)
+        target = B @ units.C
+        cols = prior_arr + np.linalg.solve(G + lam * np.eye(len(G)),
+                                           target - G @ prior_arr)
 
     delta = (Eh @ units.C - Ehat @ cols) if bias_fix else None
     return rows, biases, cols, keep, delta
@@ -837,7 +863,7 @@ def fold_constant(model: PrunableModel, layer_idx: int,
 
 def repair_deletion(model: PrunableModel, layer_idx: int, x: torch.Tensor,
                     removed: Sequence[int], repair: str = "kernel",
-                    max_rows: int = 20000
+                    max_rows: int = 20000, ridge: float = 1e-8
                     ) -> tuple[np.ndarray | None, np.ndarray | None]:
     """Re-solve the surviving consumer columns after deleting `removed`.
 
@@ -896,7 +922,7 @@ def repair_deletion(model: PrunableModel, layer_idx: int, x: torch.Tensor,
         A[K, :K] = g1
         A[K, K] = 1.0
         rhs[K] = b1
-    lam = 1e-8 * max(np.trace(A) / n, TINY)
+    lam = ridge * max(np.trace(A) / n, TINY)   # relative ridge, as in realize()
     sol = np.linalg.solve(A + lam * np.eye(n), rhs)
 
     X = sol[:K] @ V[removed]
@@ -1093,7 +1119,7 @@ class _MashBase(PruningMethod):
                  repair: str | None = None, n_calib: int = 128,
                  gauge_correct: bool = True, bias_fix: bool = False,
                  radius: str = "sup", measure: str | None = None,
-                 max_rows: int = 20000):
+                 max_rows: int = 20000, ridge: float = 1e-8):
         if score is not None:
             self.score = score
         if dictionary is not None:
@@ -1116,6 +1142,13 @@ class _MashBase(PruningMethod):
         # None = pick per layer type: gaussian on Linear, empirical on conv
         self.measure = measure
         self.max_rows = int(max_rows)
+        # Ridge on the global repairs' normal equations, RELATIVE to the mean
+        # diagonal of the Gram: 1e-8 is a numerical guard (the operating
+        # value); OSSCAR damps its Hessian at 1e-2, and `mash_ridge_*` arms
+        # test that strength here.
+        self.ridge = float(ridge)
+        if self.repair == "none" and self.dictionary == "merge":
+            raise ValueError("repair='none' needs dictionary='medoid'")
 
     # -- setup ------------------------------------------------------------
 
@@ -1136,6 +1169,8 @@ class _MashBase(PruningMethod):
         # the recorded conv results, better there.
         can_merge = (model.prunable_bn(layer_idx) is None
                      and (not is_conv or layer.bias is not None))
+        if self.repair == "none":
+            self.dictionary = self.dictionary or "medoid"     # nothing else fits
         self.dictionary = self.dictionary or ("merge" if can_merge else "medoid")
         self.repair = self.repair or ("empirical" if is_conv else "kernel")
 
@@ -1262,7 +1297,7 @@ class _MashBase(PruningMethod):
         rows, biases, cols, keep, delta = realize(
             units, ok, clusters, dictionary=self.dictionary, repair=self.repair,
             gauge_correct=self.gauge_correct, mu=mu, Sigma=Sigma, Z=Z,
-            bias_fix=bias_fix)
+            bias_fix=bias_fix, ridge=self.ridge)
 
         H, d = units.u.shape
         # `cols` are EFFECTIVE outgoing weights v = alpha * c, so the consumer

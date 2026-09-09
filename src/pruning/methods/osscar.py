@@ -148,6 +148,9 @@ class OSSCAR(PruningMethod):
                     at the first non-improving iteration).
     local_swap:     units swapped per local-search iteration (defaults to
                     update_iter, as in the official FC-layer pipeline).
+    repair:         'osscar' (default) writes the exact least-squares weights
+                    on the final support; 'none' deletes the selected units
+                    and leaves the consumer untouched.
     chunk_size:     calibration inputs are forwarded in chunks of this many
                     samples when accumulating H. Conv consumers additionally
                     accumulate their unfolded patches in sub-chunks of
@@ -165,7 +168,14 @@ class OSSCAR(PruningMethod):
         local_swap: int | None = None,
         chunk_size: int = 4096,
         conv_chunk: int = 8,
+        repair: str = "osscar",
     ):
+        if repair not in ("osscar", "none"):
+            raise ValueError(f"repair must be 'osscar' or 'none', got {repair!r}")
+        # 'none' keeps OSSCAR's SELECTION (which is made against its damped
+        # Hessian) but deletes the units outright instead of writing the
+        # least-squares consumer weights back: the selection-only control.
+        self.repair = repair
         if (prune_fraction is None) == (n_remove is None):
             raise ValueError("osscar needs exactly one of prune_fraction / n_remove")
         self.prune_fraction = prune_fraction
@@ -356,5 +366,7 @@ class OSSCAR(PruningMethod):
         W_sol = _solve_support(XtX, XtY, _expand(prune_list, kk))
 
         remove = (prune_list & ~already).nonzero(as_tuple=True)[0].tolist()
+        if self.repair == "none":
+            return PruneDecision(remove=remove)
         model_dtype = model.outgoing_weights(layer_idx).dtype
         return PruneDecision(remove=remove, new_outgoing=W_sol.to(model_dtype))

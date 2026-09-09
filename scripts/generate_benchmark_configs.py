@@ -36,6 +36,11 @@ sys.path.insert(0, str(ROOT))
 BENCH = ROOT / "configs" / "benchmark"
 OUT = BENCH / "generated"
 PLACEHOLDER = "PLACEHOLDER_IMAGENET_ROOT"   # none left in suite.yaml; kept for overrides
+# Named arm sets in arms.yaml besides headline/ablation. Each is a tier value
+# for --tier / arms_tier and gets manifest_<class>_<tier>.txt plus one
+# manifest_<tier>_<entry>.txt per entry (these tiers are submitted per model).
+NAMED_TIERS = ("scale", "repair")
+LEGACY_TIERS = ("headline", "ablation", "all")
 
 
 # ── arm expansion ────────────────────────────────────────────────────────────
@@ -75,17 +80,19 @@ def expand_arms(arms_spec: dict) -> list[dict]:
                         "requires_nobn": needs_nobn})
 
     headline = set(arms_spec.get("headline") or [])
-    # `scale` is a third, overlapping set rather than a tier value: the arms the
-    # big models carry (see arms.yaml). An arm can be both headline and scale.
-    scale = set(arms_spec.get("scale") or [])
+    # Named arm SETS beyond headline/ablation -- `scale`, `repair`, ... -- are
+    # overlapping lists in arms.yaml (see NAMED_TIERS). An arm can sit in any
+    # number of them; `--tier <name>` selects one.
+    named = {t: set(arms_spec.get(t) or []) for t in NAMED_TIERS}
     seen: dict[str, dict] = {}
     for a in out:
         if a["name"] in seen:
             raise ValueError(f"duplicate arm name {a['name']!r}")
         a["tier"] = "headline" if a["name"] in headline else "ablation"
-        a["scale"] = a["name"] in scale
+        a["tiers"] = {t for t, names in named.items() if a["name"] in names}
+        a["scale"] = "scale" in a["tiers"]
         seen[a["name"]] = a
-    for label, names in (("headline", headline), ("scale", scale)):
+    for label, names in [("headline", headline)] + list(named.items()):
         unknown = names - set(seen)
         if unknown:
             raise ValueError(
@@ -168,9 +175,11 @@ def main() -> None:
                     help="keep only these suite entries (by name)")
     ap.add_argument("--resources", nargs="*", default=None,
                     help="keep only these resource classes")
-    ap.add_argument("--tier", choices=("headline", "ablation", "scale", "all"),
-                    default=None,
-                    help="override every entry's arms_tier (default: per-entry)")
+    ap.add_argument("--tier", choices=LEGACY_TIERS + NAMED_TIERS, default=None,
+                    help="override every entry's arms_tier (default: per-entry). "
+                         "A NAMED tier (scale, repair) writes only that tier's "
+                         "manifests and leaves manifest.txt and the class "
+                         "manifests alone")
     ap.add_argument("--output-root", default=None,
                     help="where results go (default: suite.yaml's, i.e. lab scratch)")
     ap.add_argument("--dry-run", action="store_true")
@@ -212,7 +221,7 @@ def main() -> None:
                 continue
             if tier == "ablation" and arm["tier"] == "headline":
                 continue
-            if tier == "scale" and not arm["scale"]:
+            if tier in NAMED_TIERS and tier not in arm["tiers"]:
                 continue
             if arm["name"] in (entry.get("exclude_arms") or ()):
                 # Measured, not guessed: HOPE's pair enumeration scales H^2.28,
@@ -249,15 +258,13 @@ def main() -> None:
             cls = entry.get("resources", "small")
             by_class.setdefault(cls, []).append(rec)
             by_class.setdefault(f"{cls}_{arm['tier']}", []).append(rec)
-            if arm["scale"]:
-                by_class.setdefault(f"{cls}_scale", []).append(rec)
-            if tier == "scale":
-                # One manifest per big model: these cells are hours each and
-                # get submitted model by model, seed by seed (see
-                # studies/SUBMIT_NEXT.md), not as one class-wide array. Only
-                # for entries ON the scale tier -- the cheap `all` entries
-                # carry these arms inside their class manifest already.
-                by_class.setdefault(f"scale_{entry['name']}", []).append(rec)
+            for t in arm["tiers"]:
+                by_class.setdefault(f"{cls}_{t}", []).append(rec)
+            if tier in NAMED_TIERS:
+                # One manifest per model for a named tier: these cells are
+                # submitted model by model, seed by seed (studies/SUBMIT_NEXT.md),
+                # not as one class-wide array.
+                by_class.setdefault(f"{tier}_{entry['name']}", []).append(rec)
             kept += 1
             if not args.dry_run:
                 path = OUT / rel
@@ -278,6 +285,18 @@ def main() -> None:
         for reason, n in sorted(skipped.items(), key=lambda kv: -kv[1])[:12]:
             print(f"  {n:>4}x  {reason}")
 
+    if not args.dry_run and args.tier in NAMED_TIERS:
+        # A named-tier run is ADDITIVE: it writes the per-config yamls and that
+        # tier's manifests only, so the benchmark's own manifest.txt and class
+        # manifests are not narrowed to this subset.
+        keep = {c: r for c, r in by_class.items()
+                if c.endswith(f"_{args.tier}") or c.startswith(f"{args.tier}_")}
+        for cls, rows in sorted(keep.items()):
+            (BENCH / f"manifest_{cls}.txt").write_text("\n".join(rows) + "\n")
+        print(f"\nwrote {OUT} and {len(keep)} {args.tier}-tier manifests:")
+        for cls in sorted(keep):
+            print(f"  manifest_{cls}.txt  ({len(keep[cls])} cells)")
+        return
     if not args.dry_run:
         (BENCH / "manifest.txt").write_text("\n".join(manifest) + "\n")
         # One manifest per resource class: #SBATCH lines are parsed before the
@@ -288,8 +307,8 @@ def main() -> None:
         print(f"\nwrote {OUT}")
         print(f"wrote {BENCH / 'manifest.txt'} ({len(manifest)} lines)")
         base = {c: r for c, r in by_class.items()
-                if not c.endswith(("_headline", "_ablation", "_scale"))
-                and not c.startswith("scale_")}
+                if not c.endswith(("_headline", "_ablation") + tuple(f"_{t}" for t in NAMED_TIERS))
+                and not c.startswith(tuple(f"{t}_" for t in NAMED_TIERS))}
         print("\ncells per class:")
         for cls in sorted(base):
             h = len(by_class.get(f"{cls}_headline", []))

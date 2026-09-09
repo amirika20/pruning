@@ -89,6 +89,37 @@ scale:
   - mash_sampled_merge_empirical_delta_f
   - mash_sampled_medoid_empirical_delta_f
 
+# REPAIR arms: the two selection-vs-repair experiments (decided 2026-09-09).
+#   1. with vs without repair, for random, magnitude, OSSCAR and MASH (delta_f
+#      Ward score from Gaussian moments AND from sample Grams). "Without" is
+#      deletion of the arm's own removed set: repair=none on the baselines,
+#      osscar_norepair, and mash_*_medoid_none_delta_f (medoid survivors keep
+#      their original columns; a merged hyperplane has no unrepaired form).
+#   2. with vs without ridge on the shared empirical repair, for random,
+#      magnitude and MASH: 1e-8 (the operating guard) vs 1e-2 (OSSCAR's
+#      damping), both relative to the mean diagonal of the Gram.
+# Runs on every ImageNet model, OPT-125m/350m/1.3b and the CIFAR ResNets
+# (`--tier repair`); the best configuration then goes to the larger OPTs.
+repair:
+  - random
+  - random_empirical
+  - random_ridge
+  - magnitude_mass
+  - magnitude_mass_empirical
+  - magnitude_mass_ridge
+  - osscar
+  - osscar_norepair
+  - mash_medoid_none_delta_f
+  - mash_medoid_empirical_delta_f
+  - mash_ridge_medoid_empirical_delta_f
+  - mash_merge_empirical_delta_f
+  - mash_ridge_merge_empirical_delta_f
+  - mash_sampled_medoid_none_delta_f
+  - mash_sampled_medoid_empirical_delta_f
+  - mash_ridge_sampled_medoid_empirical_delta_f
+  - mash_sampled_merge_empirical_delta_f
+  - mash_ridge_sampled_merge_empirical_delta_f
+
 # ── explicit arms ────────────────────────────────────────────────────────────
 arms:
 
@@ -102,6 +133,10 @@ arms:
     params: {seed: 0, repair: empirical}
     note: "with a global repair the survivor SPAN sets capacity, so this is the
            sharpest test of whether any selection beats an arbitrary subset"
+  - name: random_ridge
+    kind: random
+    params: {seed: 0, repair: empirical, ridge: 1.0e-2}
+    note: "the same repair with OSSCAR's damping strength"
 
   # -- magnitude, all four norms. The gap between `mass` and the rest measures
   #    the gauge argument: a function-preserving rescale (w,b,c)->(tw,tb,c/t)
@@ -122,6 +157,9 @@ arms:
   - name: magnitude_mass_empirical
     kind: magnitude
     params: {norm: mass, repair: empirical}
+  - name: magnitude_mass_ridge
+    kind: magnitude
+    params: {norm: mass, repair: empirical, ridge: 1.0e-2}
 
   # -- saturated: the free tier -----------------------------------------------
   - name: saturated_dead_empirical
@@ -153,6 +191,10 @@ arms:
     note: "width comes from the sweep, not from params -- osscar validates that
            exactly one of prune_fraction/n_remove is set, and the sweep injects
            it per width (see src/experiments/sweep._width_params)"
+  - name: osscar_norepair
+    kind: osscar
+    params: {repair: none}
+    note: "OSSCAR's selection, deleted outright -- the selection-only control"
   - name: hope
     kind: hope
     params: {}
@@ -202,6 +244,45 @@ grids:
     # NotImplementedError and points at medoid, which keeps original filters and
     # their BN slots. Generating these on a BN entry only queues cells that
     # cannot run: 16 of them failed that way on the CIFAR ResNets.
+    requires_nobn_when:
+      dictionary: [merge]
+
+  # repair='none' on the medoid dictionary: the selection-only control for
+  # experiment 1. Both measures of the delta_f score.
+  - prefix: mash
+    kind: mash
+    axes:
+      score: [delta_f]
+      dictionary: [medoid]
+      repair: [none]
+  - prefix: mash_sampled
+    kind: mash
+    fixed: {measure: empirical}
+    axes:
+      score: [delta_f]
+      dictionary: [medoid]
+      repair: [none]
+    requires: fc
+
+  # the ridge toggle on the empirical repair (experiment 2): OSSCAR's 1e-2
+  # against the 1e-8 guard the plain arms use. Both measures, both dictionaries.
+  - prefix: mash_ridge
+    kind: mash
+    fixed: {ridge: 1.0e-2}
+    axes:
+      score: [delta_f]
+      dictionary: [merge, medoid]
+      repair: [empirical]
+    requires_nobn_when:
+      dictionary: [merge]
+  - prefix: mash_ridge_sampled
+    kind: mash
+    fixed: {ridge: 1.0e-2, measure: empirical}
+    axes:
+      score: [delta_f]
+      dictionary: [merge, medoid]
+      repair: [empirical]
+    requires: fc
     requires_nobn_when:
       dictionary: [merge]
 

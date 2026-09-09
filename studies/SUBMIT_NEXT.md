@@ -232,3 +232,65 @@ sbatch --gres=gpu:h100:1 --array=1-2 scripts/slurm_xlarge.sh configs/benchmark/m
 Add `--exclude=$(sort -u logs/bad_nodes.txt | paste -sd,)` to each if that file
 is non-empty. Budget: ImageNet ~15 GPU-h, opt1.3b ~90 GPU-h over 27 tasks,
 opt2.7b ~20 GPU-h for the five that fit, opt6.7b ~20 GPU-h, opt13b ~1 GPU-h.
+
+---
+
+## 5. Repair tier (decided 2026-09-09) — selection vs repair, and the ridge
+
+Two experiments, one arm set (`arms.yaml` `repair:`), generated with
+`--tier repair` for the nine models below. The generator writes
+`configs/benchmark/manifest_repair_<entry>.txt` per model and does NOT touch
+`manifest.txt` or the class manifests.
+
+**Experiment 1 — with vs without repair.** random, magnitude, OSSCAR, MASH
+(delta_f Ward score, both the Gaussian-moment and the sample-Gram measure).
+"Without" is the arm's own removed set deleted outright: `random`,
+`magnitude_mass`, `osscar_norepair` (new: OSSCAR's selection, no consumer
+rewrite), `mash_medoid_none_delta_f` / `mash_sampled_medoid_none_delta_f`
+(new `repair: none`: medoid survivors keep their original columns). "With" is
+`*_empirical`, `osscar`, `mash_{medoid,merge}_empirical_delta_f` and the
+`mash_sampled_*` versions.
+
+**Experiment 2 — the ridge.** The empirical repair at the 1e-8 guard vs
+OSSCAR's 1e-2, relative to the mean diagonal of the Gram, for random,
+magnitude and MASH: `random_ridge`, `magnitude_mass_ridge`,
+`mash_ridge_{medoid,merge}_empirical_delta_f`, `mash_ridge_sampled_*`. MASH's
+ridge is centred on the unrepaired columns (lam -> inf returns repair=none /
+the sum rule), which is the same limit OSSCAR's damped target and the
+baselines' transfer have; a zero-centred ridge would have driven the columns
+to zero.
+
+Arms per model: 18 on the FC entries (ViT, the OPTs), 11 on the BN ResNets
+and MobileNetV2 (no merge, no sampled measure -- conv already scores
+empirically). 127 cells, 323 seed-runs. `random`, `magnitude_mass`, `osscar`
+and `mash_{medoid,merge}_empirical_delta_f` overlap the scale/ablation tiers:
+finished seed dirs are reused by the plots, so skip those lines when a cell is
+already on disk (`ls outputs/benchmark/<cell>/seed_*`).
+
+**Cost.** The Grams now form on the GPU, so a MASH cell is its planning pass
+plus seconds per width. Per seed: CIFAR ResNets and ImageNet convs minutes per
+arm; OPT-125m ~15 min per MASH arm; OPT-350m ~1.1 h per MASH arm, ~0.5 h
+OSSCAR; OPT-1.3b ~10 h per MASH arm (10 arms), ~3.5 h OSSCAR (2 arms). At three
+seeds OPT-1.3b alone is ~330 GPU-h; with `SEED=0` only it is ~110. Everything
+else together is under 60 GPU-h.
+
+```bash
+# CIFAR + OPT-125m/350m: medium class, one task per cell, three seeds each
+for m in cifar10_resnet20 cifar10_resnet56 wikitext_opt125m wikitext_opt350m; do
+  n=$(wc -l < configs/benchmark/manifest_repair_$m.txt)
+  sbatch --array=1-$n scripts/slurm_medium.sh configs/benchmark/manifest_repair_$m.txt
+done
+# ImageNet: large class, one task per cell
+for m in imagenet_resnet18 imagenet_resnet50 imagenet_mobilenetv2 imagenet_vit_b16; do
+  n=$(wc -l < configs/benchmark/manifest_repair_$m.txt)
+  sbatch --array=1-$n scripts/slurm_large.sh configs/benchmark/manifest_repair_$m.txt
+done
+# OPT-1.3b: split by seed; start with seed 0 and add seeds 1-2 if the budget allows
+sbatch --export=ALL,SEED=0 --array=1-18 scripts/slurm_large.sh configs/benchmark/manifest_repair_wikitext_opt1.3b.txt
+```
+
+Add `--exclude=$(sort -u logs/bad_nodes.txt | paste -sd,)` if that file is
+non-empty. Figures: `python studies/paper/figs/make_repair_figures.py` writes
+`fig_repair_effect`, `fig_repair_ridge` and `fig_repair_measure` from whatever
+cells exist. The best configuration from these then goes to OPT-2.7b/6.7b as
+§4 describes.
