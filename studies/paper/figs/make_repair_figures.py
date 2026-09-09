@@ -123,7 +123,8 @@ def figure(models, pairs, styles, name, note):
         if n_seeds:
             # perplexity curves rise from the lower left, so the empty corner
             # is the lower right; accuracy curves fall, so it is the lower left
-            ax.legend(frameon=False, fontsize=6.5, ncol=2, handlelength=2.2,
+            ax.legend(frameon=False, fontsize=6.5, ncol=1 if metric == "ppl" else 2,
+                      handlelength=2.2,
                       loc="lower right" if metric == "ppl" else "lower left")
     for ax in axes.flat[n:]:
         ax.axis("off")
