@@ -1,0 +1,12 @@
+configs/benchmark/generated/imagenet_resnet50/random.yaml
+configs/benchmark/generated/imagenet_resnet50/random_ridge.yaml
+configs/benchmark/generated/imagenet_resnet50/magnitude_mass.yaml
+configs/benchmark/generated/imagenet_resnet50/magnitude_mass_ridge.yaml
+configs/benchmark/generated/imagenet_resnet50/mash_certified.yaml
+configs/benchmark/generated/imagenet_resnet50/osscar.yaml
+configs/benchmark/generated/imagenet_resnet50/osscar_norepair.yaml
+configs/benchmark/generated/imagenet_resnet50/mash_medoid_sum_cylinder.yaml
+configs/benchmark/generated/imagenet_resnet50/mash_medoid_sum_delta_f.yaml
+configs/benchmark/generated/imagenet_resnet50/mash_medoid_none_delta_f.yaml
+configs/benchmark/generated/imagenet_resnet50/mash_ridge_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/imagenet_resnet50/mash_ridge_medoid_empirical_cylinder.yaml

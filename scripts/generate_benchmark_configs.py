@@ -39,7 +39,7 @@ PLACEHOLDER = "PLACEHOLDER_IMAGENET_ROOT"   # none left in suite.yaml; kept for 
 # Named arm sets in arms.yaml besides headline/ablation. Each is a tier value
 # for --tier / arms_tier and gets manifest_<class>_<tier>.txt plus one
 # manifest_<tier>_<entry>.txt per entry (these tiers are submitted per model).
-NAMED_TIERS = ("scale", "repair")
+NAMED_TIERS = ("scale", "repair", "paper", "paper_big")
 LEGACY_TIERS = ("headline", "ablation", "all")
 
 

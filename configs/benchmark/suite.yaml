@@ -330,9 +330,8 @@ defaults:
 # Seeds vary the calibration draw and the evaluation split, not the weights, for
 # pretrained entries -- so one seed is enough where a download fixes the model
 # AND the arm is deterministic. The big LMs get one to keep the queue honest.
+# resnet50 and vit_b16 moved to three seeds on 2026-09-10 (paper tier).
 seed_overrides:
   wikitext_opt2.7b: [0]
-  imagenet_resnet50: [0]
-  imagenet_vit_b16: [0]
   wikitext_opt6.7b: [0]
   wikitext_opt13b: [0]

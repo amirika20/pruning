@@ -127,6 +127,46 @@ repair:
   - mash_gaussian_merge_empirical_delta_f
   - mash_ridge_gaussian_merge_empirical_delta_f
 
+# PAPER arms (paper/PLAN.md, decided 2026-09-10): the cells the paper's figures
+# read. OSSCAR keeps its OWN repair (no osscar_ridge); every other repaired arm
+# is the empirical repair at ridge 1e-2. Sampled delta_f is the default score;
+# the Gaussian twins are the measure ablation on FC models. `paper_big` is the
+# reduced set for OPT-2.7b/6.7b: no Gaussian ablation, no medoid variants, no
+# mash_certified -- the arms the headline figures need and nothing else.
+paper:
+  - random
+  - random_ridge
+  - magnitude_mass
+  - magnitude_mass_ridge
+  - osscar
+  - osscar_norepair
+  - mash_medoid_none_delta_f
+  - mash_medoid_sum_delta_f
+  - mash_merge_sum_delta_f
+  - mash_ridge_medoid_empirical_delta_f
+  - mash_ridge_merge_empirical_delta_f
+  - mash_gaussian_medoid_none_delta_f
+  - mash_gaussian_medoid_sum_delta_f
+  - mash_gaussian_merge_sum_delta_f
+  - mash_ridge_gaussian_medoid_empirical_delta_f
+  - mash_ridge_gaussian_merge_empirical_delta_f
+  - mash_merge_sum_cylinder
+  - mash_medoid_sum_cylinder
+  - mash_ridge_merge_empirical_cylinder
+  - mash_ridge_medoid_empirical_cylinder
+  - mash_certified
+paper_big:
+  - random
+  - random_ridge
+  - magnitude_mass
+  - magnitude_mass_ridge
+  - osscar
+  - osscar_norepair
+  - mash_medoid_none_delta_f
+  - mash_merge_sum_delta_f
+  - mash_ridge_merge_empirical_delta_f
+  - mash_merge_sum_cylinder
+
 # ── explicit arms ────────────────────────────────────────────────────────────
 arms:
 
@@ -293,7 +333,7 @@ grids:
     kind: mash
     fixed: {ridge: 1.0e-2}
     axes:
-      score: [delta_f]
+      score: [delta_f, cylinder]      # cylinder: the certificate tier, repaired
       dictionary: [merge, medoid]
       repair: [empirical]
     requires_nobn_when:
