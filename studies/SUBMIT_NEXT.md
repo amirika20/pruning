@@ -345,3 +345,51 @@ paste -sd,)` if that file is non-empty. Figures:
 `python studies/paper/figs/make_repair_figures.py` writes `fig_repair_effect`,
 `fig_repair_ridge` and `fig_repair_measure` from whatever cells exist. The
 best configuration from these then goes to OPT-2.7b/6.7b as §4 describes.
+
+---
+
+## 6. Paper tier (decided 2026-09-10) — the one submission that gets everything
+
+`paper/PLAN.md` fixes the claims; `paper/inventory.py --out <scratch results>`
+prints what is still missing. Manifests: `configs/benchmark/manifest_paper_<entry>.txt`
+(21 arms) and `manifest_paper_big_wikitext_opt{2.7b,6.7b}.txt` (10 arms).
+`run_manifest` skips finished cells, so every command below is safe to repeat.
+
+```bash
+# 0. stale jobs, code, and the rename (MANDATORY before any submission)
+scancel -u $USER --name=prune_large --state=PENDING   # or scancel the 1.3b arrays by id
+git pull && git log --oneline -1                      # >= 7101f9f
+python scripts/rename_gaussian_outputs.py --root $PRUNING_SCRATCH/results --dry-run
+python scripts/rename_gaussian_outputs.py --root $PRUNING_SCRATCH/results
+
+# 1. LeNet (small) and CIFAR + OPT-125m/350m (medium): 3 cells per GPU
+n=$(wc -l < configs/benchmark/manifest_paper_mnist_lenet.txt)
+sbatch --export=ALL,PARALLEL=3 --cpus-per-task=6 --array=1-$(( (n+2)/3 )) scripts/slurm_small.sh configs/benchmark/manifest_paper_mnist_lenet.txt
+for m in cifar10_resnet20 cifar10_resnet56 wikitext_opt125m wikitext_opt350m; do
+  n=$(wc -l < configs/benchmark/manifest_paper_$m.txt)
+  sbatch --export=ALL,PARALLEL=3 --cpus-per-task=6 --array=1-$(( (n+2)/3 )) scripts/slurm_medium.sh configs/benchmark/manifest_paper_$m.txt
+done
+
+# 2. ImageNet: ONE cell per task (12 GB float calibration set per process)
+for m in imagenet_resnet18 imagenet_resnet50 imagenet_mobilenetv2 imagenet_vit_b16; do
+  n=$(wc -l < configs/benchmark/manifest_paper_$m.txt)
+  sbatch --array=1-$n scripts/slurm_large.sh configs/benchmark/manifest_paper_$m.txt
+done
+
+# 3. OPT-1.3b, per seed. Sampled half: 2 cells per GPU (planning is GPU Grams
+#    now). Gaussian half: ONE task running its 5 cells in sequence, so the 10 h
+#    CPU medoid plan is made once and the other Gaussian arms reuse it (the merge
+#    Gaussian plan already exists on disk from the probe).
+for s in 0 1 2; do
+  sbatch --export=ALL,SEED=$s,PARALLEL=2 --cpus-per-task=4 --array=1-8 scripts/slurm_large.sh configs/benchmark/manifest_paper_wikitext_opt1.3b_sampled.txt
+  sbatch --export=ALL,SEED=$s scripts/slurm_large.sh configs/benchmark/manifest_paper_wikitext_opt1.3b_gaussian.txt
+done
+
+# 4. OPT-2.7b and 6.7b, reduced set, one seed, one cell per task. 6.7b needs the
+#    24 h wall (OSSCAR ~17 h) and 96G of host memory for the fp16 load.
+sbatch --array=1-10 --time=24:00:00 scripts/slurm_large.sh configs/benchmark/manifest_paper_big_wikitext_opt2.7b.txt
+sbatch --array=1-10 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_paper_big_wikitext_opt6.7b.txt
+```
+
+Then `python paper/inventory.py --out $PRUNING_SCRATCH/results` until it says
+complete; rerun any block above to fill gaps (finished cells are skipped).
