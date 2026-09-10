@@ -351,10 +351,20 @@ class MashEngine:
             # covariance: keep the projections Z g^T, which are ADDITIVE under
             # merging exactly as the triples are, so no d-dimensional work
             # happens after initialization.
-            self._Z = np.asarray(Z, dtype=np.float64)
-            self._Zg = self._Z @ self.g.T                  # [N, H] -> stored .T
-            self._Zg = self._Zg.T                          # [H, N], additive
-            self._Phi = self._responses(np.arange(H))      # [H, N]
+            #
+            # ON THE GPU, AS GRAMS. The responses are [H, N] with N up to 20000
+            # rows; forming `Phi[idx] - Phi[k]` for every candidate row -- once
+            # per row for the initial matrix and once per step after -- moved
+            # ~500 MB of temporaries H times over, and the sampled ViT plan took
+            # 23138 s against 618 s for the Gaussian one. Written as
+            # ||phi_i||^2 + ||phi_k||^2 - 2 <phi_i, phi_k> the initial matrix is
+            # ONE matmul and a step is one matvec, both in float64 on the
+            # device (_gram_device); nothing about the score changes.
+            dev = _gram_device()
+            Zt = torch.as_tensor(np.asarray(Z, dtype=np.float64), device=dev)
+            self._Zg = (Zt @ torch.as_tensor(self.g, device=dev).T).T.contiguous()  # [H, N]
+            self._Phi = self._responses(np.arange(H))      # torch [H, N]
+            self._sq = (self._Phi * self._Phi).sum(1) / max(self._Phi.shape[1], 1)
         else:
             self.mu = np.asarray(mu, dtype=np.float64)
             Sig = np.asarray(Sigma, dtype=np.float64)
@@ -402,14 +412,19 @@ class MashEngine:
         ||g_C|| for the unit-gain phi_C, A_C for the emitted psi_C."""
         return self.A[idx] if self._resp_kind == "centroid" else self._norms(idx)
 
-    def _responses(self, idx: np.ndarray) -> np.ndarray:
+    def _responses(self, idx: np.ndarray) -> torch.Tensor:
         """Post-ReLU responses of clusters `idx` on the calibration rows,
-        [len(idx), N], in the gain `_resp_kind` selects. Only defined for
-        measure='empirical'."""
+        [len(idx), N] as a float64 torch tensor on the Grams' device, in the
+        gain `_resp_kind` selects. Only defined for measure='empirical'."""
+        idx = np.atleast_1d(idx)
         n = self._resp_den(idx)
         safe = np.where(n > TINY, n, 1.0)
-        t = (self._Zg[idx] - self.r[idx][:, None]) / safe[:, None]
-        return np.maximum(np.where((n > TINY)[:, None], t, 0.0), 0.0)
+        dev = self._Zg.device
+        it = torch.as_tensor(idx, device=dev)
+        r = torch.as_tensor(self.r[idx][:, None], device=dev)
+        t = (self._Zg[it] - r) / torch.as_tensor(safe[:, None], device=dev)
+        ok = torch.as_tensor((n > TINY)[:, None], device=dev)
+        return torch.where(ok, t, torch.zeros((), dtype=t.dtype, device=dev)).clamp_min_(0.0)
 
     def _code(self, idx: np.ndarray, kind: str) -> tuple[np.ndarray, np.ndarray]:
         """(direction, offset-vs-x0) of clusters `idx`.
@@ -463,29 +478,33 @@ class MashEngine:
             return self._ward_weight(k, idx) * d2
 
         if self.measure == "empirical":
-            N = self._Phi.shape[1]
+            N = max(self._Phi.shape[1], 1)
+            dev = self._Phi.device
+            it = torch.as_tensor(idx, device=dev)
             phik = self._Phi[k]
             if self.score == "delta_f":
-                diff = self._Phi[idx] - phik[None, :]
-                d2 = (diff * diff).sum(axis=1) / max(N, 1)
-                return self._ward_weight(k, idx) * d2
+                # E[(phi_i - phi_k)^2] = sq_i + sq_k - 2 <phi_i, phi_k>/N: one matvec
+                cross = self._Phi[it] @ phik
+                d2 = (self._sq[it] + self._sq[k] - 2.0 * cross / N).clamp_min_(0.0)
+                return self._ward_weight(k, idx) * d2.cpu().numpy()
             # exact_damage: the candidate merged unit's own response is needed,
             # and it too follows from the additive projections -- in the same
             # gain as _Phi, so that v_k psi_k + v_l psi_l - (v_k + v_l) psi_c is
             # the difference between the emitted functions.
-            gk_ = self._Zg[k][None, :] + self._Zg[idx]
+            gk_ = self._Zg[k][None, :] + self._Zg[it]
             rc = self.r[k] + self.r[idx]
             nc = (self.A[k] + self.A[idx] if self._resp_kind == "centroid"
                   else np.linalg.norm(self.g[k][None, :] + self.g[idx], axis=1))
             safe = np.where(nc > TINY, nc, 1.0)
-            phic = np.maximum((gk_ - rc[:, None]) / safe[:, None], 0.0)
-            phil = self._Phi[idx]
+            T = lambda a: torch.as_tensor(np.asarray(a, dtype=np.float64), device=dev)
+            phic = ((gk_ - T(rc)[:, None]) / T(safe)[:, None]).clamp_min_(0.0)
+            phil = self._Phi[it]
             ek = phik[None, :] - phic
             el = phil - phic
-            wkk, wll = self._W[k, k], self._W[idx, idx]
-            wkl = self._W[k, idx]
-            cost = (wkk * (ek * ek).sum(1) + wll * (el * el).sum(1)
-                    + 2.0 * wkl * (ek * el).sum(1)) / max(N, 1)
+            wkk, wll = float(self._W[k, k]), T(self._W[idx, idx])
+            wkl = T(self._W[k, idx])
+            cost = ((wkk * (ek * ek).sum(1) + wll * (el * el).sum(1)
+                     + 2.0 * wkl * (ek * el).sum(1)) / N).cpu().numpy()
             return np.where(nc > TINY, np.clip(cost, 0.0, None), 0.0)
 
         # norm(g[k]) rather than _resp_den's norm(g[[k]], axis=1): the two agree
@@ -543,6 +562,14 @@ class MashEngine:
             P = np.concatenate([self._radius * u, off[:, None]], axis=1)
             sq = (P * P).sum(axis=1)
             d2 = np.maximum(sq[:, None] + sq[None, :] - 2.0 * (P @ P.T), 0.0)
+            den = self.A[:, None] + self.A[None, :]
+            w = np.where(den > TINY, np.outer(self.A, self.A) / np.maximum(den, TINY), 0.0)
+            cost = w * d2
+        elif self.measure == "empirical" and self.score == "delta_f":
+            # the whole [H, H] matrix from one Gram of the responses
+            N = max(self._Phi.shape[1], 1)
+            G = (self._Phi @ self._Phi.T) / N
+            d2 = (self._sq[:, None] + self._sq[None, :] - 2.0 * G).clamp_min_(0.0).cpu().numpy()
             den = self.A[:, None] + self.A[None, :]
             w = np.where(den > TINY, np.outer(self.A, self.A) / np.maximum(den, TINY), 0.0)
             cost = w * d2
@@ -606,6 +633,7 @@ class MashEngine:
         if self.score != "cylinder" and self.measure == "empirical":
             self._Zg[k] += self._Zg[l]
             self._Phi[k] = self._responses(np.array([k]))[0]
+            self._sq[k] = (self._Phi[k] * self._Phi[k]).sum() / max(self._Phi.shape[1], 1)
             if self.score == "exact_damage":
                 rw = self._W[k, :] + self._W[l, :]
                 rw[k] = self._W[k, k] + 2.0 * self._W[k, l] + self._W[l, l]
