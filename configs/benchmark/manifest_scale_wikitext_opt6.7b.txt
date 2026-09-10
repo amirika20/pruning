@@ -5,5 +5,5 @@ configs/benchmark/generated/wikitext_opt6.7b/mash_merge_empirical_cylinder.yaml
 configs/benchmark/generated/wikitext_opt6.7b/mash_merge_empirical_delta_f.yaml
 configs/benchmark/generated/wikitext_opt6.7b/mash_medoid_empirical_cylinder.yaml
 configs/benchmark/generated/wikitext_opt6.7b/mash_medoid_empirical_delta_f.yaml
-configs/benchmark/generated/wikitext_opt6.7b/mash_sampled_merge_empirical_delta_f.yaml
-configs/benchmark/generated/wikitext_opt6.7b/mash_sampled_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/wikitext_opt6.7b/mash_gaussian_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/wikitext_opt6.7b/mash_gaussian_merge_empirical_delta_f.yaml

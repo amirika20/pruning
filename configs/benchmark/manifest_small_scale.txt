@@ -5,8 +5,8 @@ configs/benchmark/generated/mnist_mlp/mash_merge_empirical_cylinder.yaml
 configs/benchmark/generated/mnist_mlp/mash_merge_empirical_delta_f.yaml
 configs/benchmark/generated/mnist_mlp/mash_medoid_empirical_cylinder.yaml
 configs/benchmark/generated/mnist_mlp/mash_medoid_empirical_delta_f.yaml
-configs/benchmark/generated/mnist_mlp/mash_sampled_merge_empirical_delta_f.yaml
-configs/benchmark/generated/mnist_mlp/mash_sampled_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/mnist_mlp/mash_gaussian_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/mnist_mlp/mash_gaussian_merge_empirical_delta_f.yaml
 configs/benchmark/generated/fashion_mnist_mlp/random.yaml
 configs/benchmark/generated/fashion_mnist_mlp/magnitude_mass.yaml
 configs/benchmark/generated/fashion_mnist_mlp/osscar.yaml
@@ -14,8 +14,8 @@ configs/benchmark/generated/fashion_mnist_mlp/mash_merge_empirical_cylinder.yaml
 configs/benchmark/generated/fashion_mnist_mlp/mash_merge_empirical_delta_f.yaml
 configs/benchmark/generated/fashion_mnist_mlp/mash_medoid_empirical_cylinder.yaml
 configs/benchmark/generated/fashion_mnist_mlp/mash_medoid_empirical_delta_f.yaml
-configs/benchmark/generated/fashion_mnist_mlp/mash_sampled_merge_empirical_delta_f.yaml
-configs/benchmark/generated/fashion_mnist_mlp/mash_sampled_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/fashion_mnist_mlp/mash_gaussian_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/fashion_mnist_mlp/mash_gaussian_merge_empirical_delta_f.yaml
 configs/benchmark/generated/mnist_lenet/random.yaml
 configs/benchmark/generated/mnist_lenet/magnitude_mass.yaml
 configs/benchmark/generated/mnist_lenet/osscar.yaml
@@ -30,5 +30,5 @@ configs/benchmark/generated/modular_transformer/mash_merge_empirical_cylinder.ya
 configs/benchmark/generated/modular_transformer/mash_merge_empirical_delta_f.yaml
 configs/benchmark/generated/modular_transformer/mash_medoid_empirical_cylinder.yaml
 configs/benchmark/generated/modular_transformer/mash_medoid_empirical_delta_f.yaml
-configs/benchmark/generated/modular_transformer/mash_sampled_merge_empirical_delta_f.yaml
-configs/benchmark/generated/modular_transformer/mash_sampled_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/modular_transformer/mash_gaussian_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/modular_transformer/mash_gaussian_merge_empirical_delta_f.yaml

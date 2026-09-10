@@ -1163,7 +1163,8 @@ class _MashBase(PruningMethod):
         self.gauge_correct = bool(gauge_correct)
         self.bias_fix = bool(bias_fix)
         self.radius = radius
-        # None = pick per layer type: gaussian on Linear, empirical on conv
+        # None = empirical (sample Grams over the calibration inputs); 'gaussian'
+        # is the closed-form ablation and is FC-only
         self.measure = measure
         self.max_rows = int(max_rows)
         # Ridge on the global repairs' normal equations, RELATIVE to the mean
@@ -1185,7 +1186,8 @@ class _MashBase(PruningMethod):
         configs comparable before any layer has been seen.
         """
         return {"kind": "mash", "score": self.score, "dictionary": self.dictionary,
-                "measure": self.measure, "gauge_correct": self.gauge_correct,
+                "measure": self.measure or "empirical",
+                "gauge_correct": self.gauge_correct,
                 "radius": self.radius, "n_calib": self.n_calib,
                 "max_rows": self.max_rows}
 
@@ -1236,13 +1238,16 @@ class _MashBase(PruningMethod):
         frozen = np.flatnonzero(~ok)
         sub = units.subset(idx_map)
 
-        # On conv the observation space is im2col patches, whose dimension
-        # d = C_in*kH*kW runs into the thousands. Forming the d x d covariance
-        # the Gaussian scores need is then both slow and large, and E10 found
-        # that patch measure to be badly misspecified anyway (a blank-background
-        # atom plus sparse rectified foreground). So conv scores empirically:
-        # exact under the calibration sample, and no d x d anything.
-        measure = self.measure or ("empirical" if is_conv else "gaussian")
+        # THE SCORE'S MEASURE DEFAULTS TO EMPIRICAL on every layer type (decided
+        # 2026-09-10). Conv always did: patch-space Gaussians are misspecified
+        # (E10) and the d x d covariance is large. Linear layers used the
+        # closed-form rectified-Gaussian moments until the OPT repair tier
+        # showed the Gaussian-scored merges recovering nothing under the sum
+        # rule while the same recipe worked on conv -- OPT's heavy-tailed,
+        # outlier-dominated pre-activations are what the Gaussian model gets
+        # wrong. measure='gaussian' is now the explicit ablation
+        # (`mash_gaussian_*` arms, FC only).
+        measure = self.measure or "empirical"
         if is_conv and self.repair in ("kernel", "projection"):
             raise NotImplementedError(
                 f"repair={self.repair!r} evaluates its Grams in closed form "

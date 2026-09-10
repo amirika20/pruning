@@ -267,6 +267,24 @@ and `mash_{medoid,merge}_empirical_delta_f` overlap the scale/ablation tiers:
 finished seed dirs are reused by the plots, so skip those lines when a cell is
 already on disk (`ls outputs/benchmark/<cell>/seed_*`).
 
+**THE SCORE'S MEASURE FLIPPED on 2026-09-10: sample Grams are the default on
+every layer.** Every FC MASH cell finished before that was Gaussian-scored under
+a name that now means sampled. BEFORE submitting anything, rename the finished
+cells on scratch -- otherwise `run_manifest` counts them as done:
+
+```bash
+python scripts/rename_gaussian_outputs.py --root /n/netscratch/pehlevan_lab/Lab/akazeminia/pruning/results --dry-run
+python scripts/rename_gaussian_outputs.py --root /n/netscratch/pehlevan_lab/Lab/akazeminia/pruning/results
+```
+
+(`mash_<x>` -> `mash_gaussian_<x>` on FC/mixed entries, `mash_sampled_<x>` ->
+`mash_<x>`; cylinder arms and conv entries keep their names; dendrogram plan
+keys are stamped with the measure that produced them, so the renamed 1.3b
+Gaussian plans are reused by the `mash_gaussian_*` arms.) Every plain MASH
+delta_f arm on OPT-125m/350m/1.3b and ViT then needs to RUN: those are the
+sampled cells and none exist yet. The repair tier also gained the sum-rule arms
+(`mash_{merge,medoid}_sum_delta_f`, plus Gaussian twins), which reuse plans.
+
 **Cost, and how it is kept down.** Three things changed after the cluster's
 efficiency report on the OPT-1.3b probe (5% GPU utilization, 7% of 128G):
 
@@ -308,10 +326,10 @@ for m in imagenet_resnet18 imagenet_resnet50 imagenet_mobilenetv2 imagenet_vit_b
   n=$(wc -l < configs/benchmark/manifest_repair_$m.txt)
   sbatch --array=1-$n scripts/slurm_large.sh configs/benchmark/manifest_repair_$m.txt
 done
-# OPT-1.3b, seed 0. Stage 1 = the 4 planning arms + random/magnitude/osscar
-# (7 cells, 2 per GPU, 4 tasks); stage 2 = the 11 repair variants, 6 of which
-# reuse stage 1's plans, held until stage 1 has finished. Seeds 1-2: repeat
-# with SEED=1,2.
+# OPT-1.3b, seed 0. Stage 1 = the 4 planning arms (2 sampled, 2 Gaussian --
+# the Gaussian plans are already on disk and get reused) + random/magnitude/
+# osscar; stage 2 = the repair variants, which reuse stage 1's plans, held until
+# stage 1 has finished. Seeds 1-2: repeat with SEED=1,2.
 j=$(sbatch --parsable --export=ALL,SEED=0,PARALLEL=2 --cpus-per-task=4 --array=1-4 \
       scripts/slurm_large.sh configs/benchmark/manifest_repair_wikitext_opt1.3b_stage1.txt)
 sbatch --dependency=afterany:$j --export=ALL,SEED=0,PARALLEL=2 --cpus-per-task=4 --array=1-6 \

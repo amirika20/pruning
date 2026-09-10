@@ -71,8 +71,9 @@ headline:
 # without the repair confounding them:
 #   * merge vs medoid            (the dictionary; both only run where no BN)
 #   * pre- vs post-activation    (cylinder vs delta_f Ward score)
-#   * Gaussian vs sampled Grams  (measure, on the delta_f score; FC only,
-#                                 since conv already scores empirically)
+#   * sampled vs Gaussian Grams  (measure, on the delta_f score: the plain arms
+#                                 score from sample Grams, mash_gaussian_* from
+#                                 the closed-form moments; FC only)
 # Not carried: mash_certified (a different question -- it picks its own width),
 # hope / leo_pp / data_free_merge (data_free_merge alone was projected at 300
 # GPU-h for one opt6.7b seed). Every cell writes removals.json, so the
@@ -86,15 +87,17 @@ scale:
   - mash_medoid_empirical_cylinder
   - mash_merge_empirical_delta_f
   - mash_medoid_empirical_delta_f
-  - mash_sampled_merge_empirical_delta_f
-  - mash_sampled_medoid_empirical_delta_f
+  - mash_gaussian_merge_empirical_delta_f
+  - mash_gaussian_medoid_empirical_delta_f
 
 # REPAIR arms: the two selection-vs-repair experiments (decided 2026-09-09).
 #   1. with vs without repair, for random, magnitude, OSSCAR and MASH (delta_f
-#      Ward score from Gaussian moments AND from sample Grams). "Without" is
-#      deletion of the arm's own removed set: repair=none on the baselines,
-#      osscar_norepair, and mash_*_medoid_none_delta_f (medoid survivors keep
-#      their original columns; a merged hyperplane has no unrepaired form).
+#      Ward score from sample Grams -- the default -- AND from Gaussian
+#      moments, mash_gaussian_*). "Without" is deletion of the arm's own
+#      removed set: repair=none on the baselines, osscar_norepair, and
+#      mash_medoid_none_delta_f. MASH's own data-free removal is the SUM rule
+#      (mash_merge_sum_delta_f; mash_medoid_sum_delta_f under BatchNorm): the
+#      absorbed units' columns move to the survivor with no data touched.
 #   2. with vs without ridge on the shared empirical repair, for random,
 #      magnitude and MASH: 1e-8 (the operating guard) vs 1e-2 (OSSCAR's
 #      damping), both relative to the mean diagonal of the Gram.
@@ -110,15 +113,19 @@ repair:
   - osscar
   - osscar_norepair
   - mash_medoid_none_delta_f
+  - mash_medoid_sum_delta_f
   - mash_medoid_empirical_delta_f
   - mash_ridge_medoid_empirical_delta_f
+  - mash_merge_sum_delta_f
   - mash_merge_empirical_delta_f
   - mash_ridge_merge_empirical_delta_f
-  - mash_sampled_medoid_none_delta_f
-  - mash_sampled_medoid_empirical_delta_f
-  - mash_ridge_sampled_medoid_empirical_delta_f
-  - mash_sampled_merge_empirical_delta_f
-  - mash_ridge_sampled_merge_empirical_delta_f
+  - mash_gaussian_medoid_none_delta_f
+  - mash_gaussian_medoid_sum_delta_f
+  - mash_gaussian_medoid_empirical_delta_f
+  - mash_ridge_gaussian_medoid_empirical_delta_f
+  - mash_gaussian_merge_sum_delta_f
+  - mash_gaussian_merge_empirical_delta_f
+  - mash_ridge_gaussian_merge_empirical_delta_f
 
 # ── explicit arms ────────────────────────────────────────────────────────────
 arms:
@@ -248,21 +255,37 @@ grids:
       dictionary: [merge]
 
   # repair='none' on the medoid dictionary: the selection-only control for
-  # experiment 1. Both measures of the delta_f score.
+  # experiment 1 (sampled measure, the default).
   - prefix: mash
     kind: mash
     axes:
       score: [delta_f]
       dictionary: [medoid]
       repair: [none]
-  - prefix: mash_sampled
+
+  # THE GAUSSIAN-MEASURE ABLATION: the delta_f score from closed-form
+  # rectified-Gaussian moments instead of sample Grams. FC only -- on conv the
+  # d x d patch covariance is both large and misspecified (E10). Was the Linear
+  # default until 2026-09-10; finished cells from before were renamed to these
+  # names by scripts/rename_gaussian_outputs.py.
+  - prefix: mash_gaussian
     kind: mash
-    fixed: {measure: empirical}
+    fixed: {measure: gaussian}
     axes:
       score: [delta_f]
       dictionary: [medoid]
-      repair: [none]
+      repair: [none, sum, empirical]
     requires: fc
+  - prefix: mash_gaussian            # merge has no repair='none' form
+    kind: mash
+    fixed: {measure: gaussian}
+    axes:
+      score: [delta_f]
+      dictionary: [merge]
+      repair: [sum, empirical]
+    requires: fc
+    requires_nobn_when:
+      dictionary: [merge]
 
   # the ridge toggle on the empirical repair (experiment 2): OSSCAR's 1e-2
   # against the 1e-8 guard the plain arms use. Both measures, both dictionaries.
@@ -275,25 +298,9 @@ grids:
       repair: [empirical]
     requires_nobn_when:
       dictionary: [merge]
-  - prefix: mash_ridge_sampled
+  - prefix: mash_ridge_gaussian
     kind: mash
-    fixed: {ridge: 1.0e-2, measure: empirical}
-    axes:
-      score: [delta_f]
-      dictionary: [merge, medoid]
-      repair: [empirical]
-    requires: fc
-    requires_nobn_when:
-      dictionary: [merge]
-
-  # the measure toggle on the post-activation score: delta_f's Grams from
-  # sample averages over the calibration inputs instead of the closed-form
-  # rectified-Gaussian moments. FC only -- on conv `measure` already resolves to
-  # empirical (patch-space Gaussians are misspecified, E10), so the plain
-  # mash_*_delta_f arm IS this arm there and a second copy would run twice.
-  - prefix: mash_sampled
-    kind: mash
-    fixed: {measure: empirical}
+    fixed: {ridge: 1.0e-2, measure: gaussian}
     axes:
       score: [delta_f]
       dictionary: [merge, medoid]

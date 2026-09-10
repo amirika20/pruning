@@ -5,8 +5,9 @@
 Reads outputs/benchmark/<model>__<arm>/seed_*/curve.csv, mean over seeds with
 a min-max band, and writes three figures beside this script:
 
-  fig_repair_effect      experiment 1 -- each method with (solid) and without
-                         (dashed) repair. Hue = method, line style = repair.
+  fig_no_repair          experiment 1a -- each method's removed set deleted
+                         outright, no repair anywhere: selection alone.
+  fig_repair_effect      experiment 1b -- the same four methods repaired.
   fig_repair_ridge       experiment 2 -- the empirical repair at ridge 1e-8
                          (solid) vs 1e-2 (dotted) for random, magnitude, MASH.
   fig_repair_measure     MASH's delta_f score from Gaussian moments vs sample
@@ -46,7 +47,7 @@ MODELS = [  # (cell prefix, title, metric)
 ]
 # fixed categorical order (validated default palette): blue, orange, aqua, yellow, magenta
 HUE = {"MASH": "#2a78d6", "OSSCAR": "#eb6834", "magnitude": "#1baf7a",
-       "random": "#eda100", "MASH (merge)": "#e87ba4"}
+       "random": "#eda100", "MASH (merge)": "#e87ba4", "MASH sum rule": "#008300"}
 INK, INK2, GRID = "#1f1f1e", "#5f5e58", "#e4e3dd"
 
 # experiment 1: (label, arm without repair, arm with repair)
@@ -58,9 +59,11 @@ REPAIR = [("random", "random", "random_empirical"),
 RIDGE = [("random", "random_empirical", "random_ridge"),
          ("magnitude", "magnitude_mass_empirical", "magnitude_mass_ridge"),
          ("MASH", "mash_medoid_empirical_delta_f", "mash_ridge_medoid_empirical_delta_f")]
-# measure: (label, gaussian arm, sampled arm)
-MEASURE = [("MASH", "mash_medoid_empirical_delta_f", "mash_sampled_medoid_empirical_delta_f"),
-           ("MASH (merge)", "mash_merge_empirical_delta_f", "mash_sampled_merge_empirical_delta_f")]
+# measure: (label, sampled arm -- the default -- , gaussian arm)
+MEASURE = [("MASH", "mash_medoid_empirical_delta_f", "mash_gaussian_medoid_empirical_delta_f"),
+           ("MASH (merge)", "mash_merge_empirical_delta_f", "mash_gaussian_merge_empirical_delta_f")]
+# MASH's own data-free removal: the sum rule (merge where BatchNorm allows, medoid otherwise)
+SUM = [("MASH sum rule", "mash_merge_sum_delta_f", "mash_medoid_sum_delta_f")]
 
 
 def load(cell: str) -> pd.DataFrame | None:
@@ -113,10 +116,12 @@ def figure(models, pairs, styles, name, note):
         n_seeds = 0
         for label, arm_a, arm_b in pairs:
             for arm, (ls, suffix) in zip((arm_a, arm_b), styles):
+                if arm is None:
+                    continue
                 d = load(f"{cell}__{arm}")
                 if d is None:
                     continue
-                draw(ax, d, metric, HUE[label], ls, f"{label} {suffix}")
+                draw(ax, d, metric, HUE[label], ls, f"{label} {suffix}".strip())
                 n_seeds = max(n_seeds, int(d.n.max()))
                 drawn_any = True
         style(ax, title, metric, n_seeds)
@@ -150,16 +155,21 @@ def main() -> None:
     plt.rcParams.update({"font.size": 8.5, "axes.labelsize": 9, "axes.titlesize": 9.5,
                          "axes.edgecolor": INK2, "xtick.color": INK2, "ytick.color": INK2,
                          "axes.labelcolor": INK, "text.color": INK, "font.family": "DejaVu Sans"})
-    figure(models, REPAIR, [("--", "(no repair)"), ("-", "(repaired)")], "fig_repair_effect",
-           "Dashed: the arm's removed set deleted outright. Solid: the consumer re-solved -- "
-           "OSSCAR by its own damped least squares, the others by the empirical repair. "
-           "MASH = medoid dictionary, delta_f score (Gaussian moments).")
+    # experiment 1 as two figures: eight curves per panel was unreadable
+    figure(models, [(l, a0, None) for l, a0, _ in REPAIR] + [(l, a, b) for l, a, b in SUM],
+           [("-", ""), ("--", "")], "fig_no_repair",
+           "Each arm's removed set deleted outright -- no repair anywhere, so only the selection "
+           "differs. Green: MASH's data-free removal, the sum rule (merge; dashed = medoid under "
+           "BatchNorm). MASH = medoid dictionary, delta_f score from sample Grams.")
+    figure(models, [(l, a1, None) for l, _, a1 in REPAIR], [("-", ""), ("-", "")], "fig_repair_effect",
+           "The same four selections, repaired: OSSCAR by its own damped least squares, the "
+           "others by the empirical repair (ridge 1e-8). MASH = medoid, delta_f from sample Grams.")
     figure(models, RIDGE, [("-", "ridge 1e-8"), (":", "ridge 1e-2")], "fig_repair_ridge",
            "Empirical repair on each arm's removed set; ridge relative to the mean diagonal "
-           "of the Gram. 1e-2 is OSSCAR's damping strength. MASH = medoid, delta_f.")
-    figure(models, MEASURE, [("-", "Gaussian"), ("-.", "sampled")], "fig_repair_measure",
-           "MASH delta_f score with the Grams from rectified-Gaussian moments (solid) or "
-           "sample averages (dash-dot); empirical repair. Merge appears where BatchNorm allows it.")
+           "of the Gram. 1e-2 is OSSCAR's damping strength. MASH = medoid, delta_f (sample Grams).")
+    figure(models, MEASURE, [("-", "sampled"), ("-.", "Gaussian")], "fig_repair_measure",
+           "MASH delta_f score with the Grams from sample averages (solid, the default) or "
+           "rectified-Gaussian moments (dash-dot); empirical repair. Merge where BatchNorm allows it.")
 
 
 if __name__ == "__main__":
