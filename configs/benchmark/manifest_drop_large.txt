@@ -1,0 +1,10 @@
+configs/benchmark/generated/imagenet_mobilenetv2/mash_drop_none_delta_f.yaml
+configs/benchmark/generated/imagenet_mobilenetv2/mash_drop_none_cylinder.yaml
+configs/benchmark/generated/imagenet_vit_b16/mash_drop_none_delta_f.yaml
+configs/benchmark/generated/imagenet_vit_b16/mash_drop_none_cylinder.yaml
+configs/benchmark/generated/wikitext_opt1.3b/mash_drop_none_delta_f.yaml
+configs/benchmark/generated/wikitext_opt1.3b/mash_drop_none_cylinder.yaml
+configs/benchmark/generated/imagenet_resnet18/mash_drop_none_delta_f.yaml
+configs/benchmark/generated/imagenet_resnet18/mash_drop_none_cylinder.yaml
+configs/benchmark/generated/imagenet_resnet50/mash_drop_none_delta_f.yaml
+configs/benchmark/generated/imagenet_resnet50/mash_drop_none_cylinder.yaml

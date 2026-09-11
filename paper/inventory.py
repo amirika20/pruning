@@ -42,7 +42,7 @@ CLAIMS = {
                         "mash_ridge_merge_empirical_delta_f", "osscar", "random_ridge",
                         "magnitude_mass_ridge"],
     "C2 no repair": ["random", "magnitude_mass", "osscar_norepair", "mash_medoid_none_delta_f",
-                     "mash_medoid_sum_delta_f", "mash_merge_sum_delta_f"],
+                     "mash_drop_none_delta_f", "mash_medoid_sum_delta_f", "mash_merge_sum_delta_f"],
     "C3 overall + cost": ["osscar", "mash_full_medoid_empirical_delta_f",
                           "mash_ridge_merge_empirical_delta_f", "mash_ridge_medoid_empirical_delta_f",
                           "random_ridge", "magnitude_mass_ridge"],

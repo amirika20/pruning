@@ -443,3 +443,15 @@ sbatch --array=1-10 scripts/slurm_large.sh configs/benchmark/manifest_full_large
 # the removal-record reruns (§8) and the big OPTs (§7, whose reduced set now
 # includes mash_full_medoid_empirical_delta_f and mash_medoid_sum_delta_f)
 ```
+
+## 10. Drop ablation (decided 2026-09-11)
+
+`mash_drop_none_{delta_f,cylinder}`: delete BOTH members of the closest pairs
+(whole clusters at the cut), keep nothing, no repair. Expected below random.
+Shares the medoid plan, so solve-only.
+
+```bash
+sbatch --export=ALL,PARALLEL=2 --cpus-per-task=4 --array=1-1 scripts/slurm_small.sh  configs/benchmark/manifest_drop_small.txt
+sbatch --export=ALL,PARALLEL=3 --cpus-per-task=6 --array=1-3 scripts/slurm_medium.sh configs/benchmark/manifest_drop_medium.txt
+sbatch --array=1-10 scripts/slurm_large.sh configs/benchmark/manifest_drop_large.txt
+```

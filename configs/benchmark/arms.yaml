@@ -141,6 +141,8 @@ paper:
   - osscar
   - osscar_norepair
   - mash_medoid_none_delta_f
+  - mash_drop_none_delta_f
+  - mash_drop_none_cylinder
   - mash_medoid_sum_delta_f
   - mash_merge_sum_delta_f
   - mash_ridge_medoid_empirical_delta_f
@@ -352,6 +354,18 @@ grids:
     requires: fc
     requires_nobn_when:
       dictionary: [merge]
+
+  # DROP ABLATION (decided 2026-09-11): delete BOTH members of the closest
+  # pairs -- every unit of every multi-unit cluster at the cut -- and keep
+  # nothing. If the score's "redundant" units were useless this would be
+  # harmless; if they are jointly load-bearing it lands below random deletion,
+  # which is what makes the merge the right removal. Shares the medoid plan.
+  - prefix: mash
+    kind: mash
+    axes:
+      score: [delta_f, cylinder]
+      dictionary: [drop]
+      repair: [none]
 
   # FULL-ROW RIDGE REPAIR CENTRED ON THE SUM RULE (decided 2026-09-11): the
   # medoid survivors keep their units, the absorbed columns first move onto the

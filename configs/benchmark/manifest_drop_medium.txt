@@ -1,0 +1,8 @@
+configs/benchmark/generated/cifar10_resnet56/mash_drop_none_delta_f.yaml
+configs/benchmark/generated/cifar10_resnet56/mash_drop_none_cylinder.yaml
+configs/benchmark/generated/cifar10_resnet20/mash_drop_none_delta_f.yaml
+configs/benchmark/generated/cifar10_resnet20/mash_drop_none_cylinder.yaml
+configs/benchmark/generated/wikitext_opt125m/mash_drop_none_delta_f.yaml
+configs/benchmark/generated/wikitext_opt125m/mash_drop_none_cylinder.yaml
+configs/benchmark/generated/wikitext_opt350m/mash_drop_none_delta_f.yaml
+configs/benchmark/generated/wikitext_opt350m/mash_drop_none_cylinder.yaml

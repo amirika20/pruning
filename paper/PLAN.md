@@ -71,6 +71,11 @@ Cylinder certificate: `mash_merge_sum_cylinder` (the certificate tier: no data),
   wrong reading of MASH) and `mash_merge_sum_delta_f` (the merge; medoid+sum on
   BN models). The claim is that the green sum-rule curve sits above every
   deletion curve.
+- **F2b drop ablation** (decided 2026-09-11). `mash_drop_none_delta_f`: at each
+  width delete BOTH members of the closest pairs (every unit of every
+  multi-unit cluster) and keep nothing. Expected below random: the units the
+  score pairs are jointly load-bearing, not useless, so only merging removes
+  them safely. Plotted with random, MASH-delete and merge+sum.
 - Models: all. Seeds: 3.
 
 ### C3. For overall performance, OSSCAR is optimal

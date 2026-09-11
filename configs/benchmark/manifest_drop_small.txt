@@ -1,0 +1,2 @@
+configs/benchmark/generated/mnist_lenet/mash_drop_none_delta_f.yaml
+configs/benchmark/generated/mnist_lenet/mash_drop_none_cylinder.yaml

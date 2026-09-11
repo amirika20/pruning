@@ -142,6 +142,7 @@ def norepair(m):
             ("magnitude, delete", "magnitude_mass", "-", "magnitude"),
             ("OSSCAR, delete", "osscar_norepair", "-", "OSSCAR"),
             ("MASH, delete (medoid, none)", "mash_medoid_none_delta_f", "--", "MASH delete"),
+            ("MASH, drop both of each pair", "mash_drop_none_delta_f", ":", "MASH delete"),
             (f"MASH delta_f, {dc} + sum", f"mash_{dc}_sum_delta_f", "-", "MASH delta_f"),
             (f"MASH cylinder, {dc} + sum", f"mash_{dc}_sum_cylinder", "-", "MASH cylinder")]
 

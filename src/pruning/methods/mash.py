@@ -122,7 +122,12 @@ TINY = 1e-12
 ZERO_NORM = 1e-10
 
 SCORES = ("cylinder", "delta_f", "exact_damage")
-DICTIONARIES = ("merge", "medoid")
+# `drop` is an ABLATION emission, not a dictionary: at a cut it deletes EVERY
+# member of every multi-unit cluster and keeps nothing of them. Where medoid
+# keeps one representative and merge synthesises one, drop tests whether the
+# units the score calls redundant were useless (deleting both is harmless) or
+# jointly load-bearing (deleting both is worse than deleting at random).
+DICTIONARIES = ("merge", "medoid", "drop")
 REPAIRS = ("none", "sum", "projection", "kernel", "empirical")
 
 
@@ -1224,6 +1229,11 @@ class _MashBase(PruningMethod):
         self.ridge_prior = ridge_prior
         if self.repair == "none" and self.dictionary == "merge":
             raise ValueError("repair='none' needs dictionary='medoid'")
+        if self.dictionary == "drop":
+            if self.repair not in (None, "none"):
+                raise ValueError("dictionary='drop' deletes whole clusters; it takes "
+                                 "repair='none' only")
+            self.repair = "none"
 
     def plan_key(self) -> dict:
         """Everything the DENDROGRAM depends on, and nothing it does not.
@@ -1235,7 +1245,9 @@ class _MashBase(PruningMethod):
         the CONFIGURED values (None = per-layer auto), which is what makes two
         configs comparable before any layer has been seen.
         """
-        return {"kind": "mash", "score": self.score, "dictionary": self.dictionary,
+        return {"kind": "mash", "score": self.score,
+                # drop plans as medoid, so it shares the medoid dendrogram
+                "dictionary": "medoid" if self.dictionary == "drop" else self.dictionary,
                 "measure": self.measure or "empirical",
                 "gauge_correct": self.gauge_correct,
                 "radius": self.radius, "n_calib": self.n_calib,
@@ -1467,7 +1479,8 @@ class _MashBase(PruningMethod):
                             idx_map=idx_map, n_mergeable=len(idx_map))
         eng = MashEngine(sub, score=self.score, x0=x0, radius=rad, mu=mu,
                          Sigma=Sigma, gauge_correct=self.gauge_correct,
-                         measure=measure, Z=Z, dictionary=self.dictionary)
+                         measure=measure, Z=Z,
+                         dictionary="medoid" if self.dictionary == "drop" else self.dictionary)
         recs = eng.dendrogram()
         return MashPlan(layer_idx=layer_idx,
                         pairs=[(r["survivor"], r["removed"]) for r in recs],
@@ -1495,6 +1508,24 @@ class _MashBase(PruningMethod):
         k = max(0, min(int(n_merges), plan.max_merges))
         if k <= 0:
             return PruneDecision(remove=[])
+        if self.dictionary == "drop":
+            # `k` is the width budget (units to remove). Deleting whole clusters
+            # removes k' + (number of multi-unit clusters) units after k' merges,
+            # which is monotone in k', so take the largest k' that stays within
+            # budget. No surgery: the survivors are untouched, the clusters go.
+            def removed_at(kk: int) -> int:
+                return sum(len(c) for c in partition_at(plan.n_mergeable, plan.pairs, kk)
+                           if len(c) > 1)
+            lo, hi = 0, k
+            while lo < hi:
+                mid = (lo + hi + 1) // 2
+                if removed_at(mid) <= k:
+                    lo = mid
+                else:
+                    hi = mid - 1
+            gone = [int(idx_map[i]) for c in partition_at(plan.n_mergeable, plan.pairs, lo)
+                    if len(c) > 1 for i in c]
+            return PruneDecision(remove=sorted(gone))
         clusters = partition_at(plan.n_mergeable, plan.pairs, k)
         recs = plan.recs[:k]
         return self._emit(model, layer_idx, units, ok, idx_map, frozen,
@@ -1582,7 +1613,8 @@ class MASHCertified(_MashBase):
             return PruneDecision(remove=[])
         eng = MashEngine(sub, score=self.score, x0=x0, radius=rad, mu=mu,
                          Sigma=Sigma, gauge_correct=self.gauge_correct,
-                         measure=measure, Z=Z, dictionary=self.dictionary)
+                         measure=measure, Z=Z,
+                         dictionary="medoid" if self.dictionary == "drop" else self.dictionary)
         if self.scale == "mass":
             denom = eng.mass_total()
         else:
