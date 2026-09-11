@@ -426,3 +426,20 @@ lacks removals.
 ```bash
 sbatch --export=ALL,RERUN=1,PARALLEL=3 --cpus-per-task=6 --array=1-3 scripts/slurm_medium.sh configs/benchmark/manifest_rerun_removals.txt
 ```
+
+## 9. Full-row ridge repair on the medoid (decided 2026-09-11)
+
+`mash_full_medoid_empirical_{delta_f,cylinder}`: medoid survivors, sum-rule
+transfer, ridge 1e-2 repair fitted on EVERY calibration token (repair_rows: 0)
+and centred on the sum-rule column. Plans are reused from the existing
+delta_f/cylinder cells, so each cell is solve-only (~1 h at 1.3b, minutes
+below). No more Gaussian arms are queued (too slow); the 1.3b Gaussian merge
+seeds 1-2 stay missing by decision.
+
+```bash
+sbatch --export=ALL,PARALLEL=2 --cpus-per-task=4 --array=1-1 scripts/slurm_small.sh  configs/benchmark/manifest_full_small.txt
+sbatch --export=ALL,PARALLEL=3 --cpus-per-task=6 --array=1-3 scripts/slurm_medium.sh configs/benchmark/manifest_full_medium.txt
+sbatch --array=1-10 scripts/slurm_large.sh configs/benchmark/manifest_full_large.txt      # ImageNet one per task; 1.3b cells ~1 h
+# the removal-record reruns (§8) and the big OPTs (§7, whose reduced set now
+# includes mash_full_medoid_empirical_delta_f and mash_medoid_sum_delta_f)
+```

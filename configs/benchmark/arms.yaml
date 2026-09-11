@@ -145,6 +145,8 @@ paper:
   - mash_merge_sum_delta_f
   - mash_ridge_medoid_empirical_delta_f
   - mash_ridge_merge_empirical_delta_f
+  - mash_full_medoid_empirical_delta_f
+  - mash_full_medoid_empirical_cylinder
   - mash_gaussian_medoid_none_delta_f
   - mash_gaussian_medoid_sum_delta_f
   - mash_gaussian_merge_sum_delta_f
@@ -163,8 +165,10 @@ paper_big:
   - osscar
   - osscar_norepair
   - mash_medoid_none_delta_f
+  - mash_medoid_sum_delta_f
   - mash_merge_sum_delta_f
   - mash_ridge_merge_empirical_delta_f
+  - mash_full_medoid_empirical_delta_f
   - mash_merge_sum_cylinder
 
 # ── explicit arms ────────────────────────────────────────────────────────────
@@ -348,6 +352,20 @@ grids:
     requires: fc
     requires_nobn_when:
       dictionary: [merge]
+
+  # FULL-ROW RIDGE REPAIR CENTRED ON THE SUM RULE (decided 2026-09-11): the
+  # medoid survivors keep their units, the absorbed columns first move onto the
+  # survivor (sum rule), then the ridge repair re-solves from there using EVERY
+  # calibration token (repair_rows: 0) instead of the 20000-row subsample.
+  # Same 128 sequences as OSSCAR, now the same rows too. lam -> inf returns
+  # medoid+sum. Plans are shared with the other delta_f/cylinder arms.
+  - prefix: mash_full
+    kind: mash
+    fixed: {ridge: 1.0e-2, ridge_prior: sum, repair_rows: 0}
+    axes:
+      score: [delta_f, cylinder]
+      dictionary: [medoid]
+      repair: [empirical]
 
   # the bias-compensation toggle, on the two repairs where it can matter
   # (a global solve already zero-means its residual, so it is ~free there)

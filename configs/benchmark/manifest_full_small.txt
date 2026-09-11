@@ -1,0 +1,2 @@
+configs/benchmark/generated/mnist_lenet/mash_full_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/mnist_lenet/mash_full_medoid_empirical_cylinder.yaml

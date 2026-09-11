@@ -10,6 +10,8 @@ configs/benchmark/generated/cifar10_resnet20/mash_medoid_sum_delta_f.yaml
 configs/benchmark/generated/cifar10_resnet20/mash_medoid_none_delta_f.yaml
 configs/benchmark/generated/cifar10_resnet20/mash_ridge_medoid_empirical_delta_f.yaml
 configs/benchmark/generated/cifar10_resnet20/mash_ridge_medoid_empirical_cylinder.yaml
+configs/benchmark/generated/cifar10_resnet20/mash_full_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/cifar10_resnet20/mash_full_medoid_empirical_cylinder.yaml
 configs/benchmark/generated/cifar10_resnet56/random.yaml
 configs/benchmark/generated/cifar10_resnet56/random_ridge.yaml
 configs/benchmark/generated/cifar10_resnet56/magnitude_mass.yaml
@@ -22,6 +24,8 @@ configs/benchmark/generated/cifar10_resnet56/mash_medoid_sum_delta_f.yaml
 configs/benchmark/generated/cifar10_resnet56/mash_medoid_none_delta_f.yaml
 configs/benchmark/generated/cifar10_resnet56/mash_ridge_medoid_empirical_delta_f.yaml
 configs/benchmark/generated/cifar10_resnet56/mash_ridge_medoid_empirical_cylinder.yaml
+configs/benchmark/generated/cifar10_resnet56/mash_full_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/cifar10_resnet56/mash_full_medoid_empirical_cylinder.yaml
 configs/benchmark/generated/wikitext_opt125m/random.yaml
 configs/benchmark/generated/wikitext_opt125m/random_ridge.yaml
 configs/benchmark/generated/wikitext_opt125m/magnitude_mass.yaml
@@ -43,6 +47,8 @@ configs/benchmark/generated/wikitext_opt125m/mash_ridge_medoid_empirical_delta_f
 configs/benchmark/generated/wikitext_opt125m/mash_ridge_medoid_empirical_cylinder.yaml
 configs/benchmark/generated/wikitext_opt125m/mash_ridge_gaussian_merge_empirical_delta_f.yaml
 configs/benchmark/generated/wikitext_opt125m/mash_ridge_gaussian_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/wikitext_opt125m/mash_full_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/wikitext_opt125m/mash_full_medoid_empirical_cylinder.yaml
 configs/benchmark/generated/wikitext_opt350m/random.yaml
 configs/benchmark/generated/wikitext_opt350m/random_ridge.yaml
 configs/benchmark/generated/wikitext_opt350m/magnitude_mass.yaml
@@ -64,3 +70,5 @@ configs/benchmark/generated/wikitext_opt350m/mash_ridge_medoid_empirical_delta_f
 configs/benchmark/generated/wikitext_opt350m/mash_ridge_medoid_empirical_cylinder.yaml
 configs/benchmark/generated/wikitext_opt350m/mash_ridge_gaussian_merge_empirical_delta_f.yaml
 configs/benchmark/generated/wikitext_opt350m/mash_ridge_gaussian_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/wikitext_opt350m/mash_full_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/wikitext_opt350m/mash_full_medoid_empirical_cylinder.yaml

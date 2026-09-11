@@ -10,3 +10,5 @@ configs/benchmark/generated/imagenet_resnet50/mash_medoid_sum_delta_f.yaml
 configs/benchmark/generated/imagenet_resnet50/mash_medoid_none_delta_f.yaml
 configs/benchmark/generated/imagenet_resnet50/mash_ridge_medoid_empirical_delta_f.yaml
 configs/benchmark/generated/imagenet_resnet50/mash_ridge_medoid_empirical_cylinder.yaml
+configs/benchmark/generated/imagenet_resnet50/mash_full_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/imagenet_resnet50/mash_full_medoid_empirical_cylinder.yaml

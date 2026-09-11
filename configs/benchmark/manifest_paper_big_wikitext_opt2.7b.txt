@@ -6,5 +6,7 @@ configs/benchmark/generated/wikitext_opt2.7b/osscar.yaml
 configs/benchmark/generated/wikitext_opt2.7b/osscar_norepair.yaml
 configs/benchmark/generated/wikitext_opt2.7b/mash_merge_sum_cylinder.yaml
 configs/benchmark/generated/wikitext_opt2.7b/mash_merge_sum_delta_f.yaml
+configs/benchmark/generated/wikitext_opt2.7b/mash_medoid_sum_delta_f.yaml
 configs/benchmark/generated/wikitext_opt2.7b/mash_medoid_none_delta_f.yaml
 configs/benchmark/generated/wikitext_opt2.7b/mash_ridge_merge_empirical_delta_f.yaml
+configs/benchmark/generated/wikitext_opt2.7b/mash_full_medoid_empirical_delta_f.yaml

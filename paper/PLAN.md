@@ -33,7 +33,12 @@ Baselines: `random`, `random_ridge`, `magnitude_mass`, `magnitude_mass_ridge`,
 
 MASH, sampled delta_f: `mash_medoid_none_delta_f` (delete), `mash_medoid_sum_delta_f`,
 `mash_merge_sum_delta_f` (merge + sum, data-free), `mash_ridge_medoid_empirical_delta_f`,
-`mash_ridge_merge_empirical_delta_f`.
+`mash_ridge_merge_empirical_delta_f`, and -- decided 2026-09-11 -- the headline
+repaired MASH: `mash_full_medoid_empirical_delta_f` = medoid survivors, sum-rule
+transfer, then the ridge repair fitted on EVERY calibration token (the same
+~65k rows OSSCAR's Hessian uses; the other repaired arms subsample 20000) and
+centred on the sum-rule column. `mash_full_medoid_empirical_cylinder` is its
+certificate-score twin. Both reuse the existing plans.
 
 MASH, Gaussian delta_f (FC only): `mash_gaussian_medoid_none_delta_f`,
 `mash_gaussian_medoid_sum_delta_f`, `mash_gaussian_merge_sum_delta_f`,
@@ -52,9 +57,12 @@ Cylinder certificate: `mash_merge_sum_cylinder` (the certificate tier: no data),
   `removals.json` of `mash_medoid_none_delta_f`, `osscar_norepair`, `magnitude_mass`
   via `src.analysis.pruning_detail.overlap_from_removals`. (Removal sets do not
   depend on the repair, so the no-repair cells are the canonical source.)
-- **F1b same repair.** Curves of `mash_ridge_medoid_empirical_delta_f`,
-  `mash_ridge_merge_empirical_delta_f`, `random_ridge`, `magnitude_mass_ridge`
-  under the ridge repair, against `osscar` with its own repair.
+- **F1b same repair.** `mash_full_medoid_empirical_delta_f` (the headline),
+  with `mash_ridge_{medoid,merge}_empirical_delta_f` (20000-row subsample) as
+  the row-budget ablation, `random_ridge`, `magnitude_mass_ridge`, against
+  `osscar` with its own repair. The 20000-row repair added nothing over the sum
+  rule on OPT-350m while OSSCAR's repair gained 5 ppl on an 80%-overlapping
+  set; the full-row arm tests whether the row budget is that gap.
 - Models: all. Seeds: 3.
 
 ### C2. Without any repair of the downstream layer, MASH performs better, because it replaces a useless neuron by a merged one

@@ -38,12 +38,14 @@ WANT_SEEDS.update({"wikitext_opt2.7b": 1, "wikitext_opt6.7b": 1})
 
 CLAIMS = {
     "C1a overlap (removal sets)": ["mash_medoid_none_delta_f", "osscar_norepair", "magnitude_mass"],
-    "C1b same repair": ["mash_ridge_medoid_empirical_delta_f", "mash_ridge_merge_empirical_delta_f",
-                        "osscar", "random_ridge", "magnitude_mass_ridge"],
+    "C1b same repair": ["mash_full_medoid_empirical_delta_f", "mash_ridge_medoid_empirical_delta_f",
+                        "mash_ridge_merge_empirical_delta_f", "osscar", "random_ridge",
+                        "magnitude_mass_ridge"],
     "C2 no repair": ["random", "magnitude_mass", "osscar_norepair", "mash_medoid_none_delta_f",
                      "mash_medoid_sum_delta_f", "mash_merge_sum_delta_f"],
-    "C3 overall + cost": ["osscar", "mash_ridge_merge_empirical_delta_f",
-                          "mash_ridge_medoid_empirical_delta_f", "random_ridge", "magnitude_mass_ridge"],
+    "C3 overall + cost": ["osscar", "mash_full_medoid_empirical_delta_f",
+                          "mash_ridge_merge_empirical_delta_f", "mash_ridge_medoid_empirical_delta_f",
+                          "random_ridge", "magnitude_mass_ridge"],
     "C4 measure (FC only)": ["mash_merge_sum_delta_f", "mash_gaussian_merge_sum_delta_f",
                              "mash_ridge_merge_empirical_delta_f",
                              "mash_ridge_gaussian_merge_empirical_delta_f",
@@ -51,15 +53,17 @@ CLAIMS = {
     "C5c certificate (benchmark cells)": ["mash_certified", "mash_merge_sum_cylinder",
                                           "mash_medoid_sum_cylinder",
                                           "mash_ridge_merge_empirical_cylinder",
-                                          "mash_ridge_medoid_empirical_cylinder"],
+                                          "mash_ridge_medoid_empirical_cylinder",
+                                          "mash_full_medoid_empirical_cylinder"],
 }
 CLAIM_MODELS = {"C4 measure (FC only)": [m for m in MODELS if m in FC]}
 
 
 BIG = {"wikitext_opt2.7b", "wikitext_opt6.7b"}
 PAPER_BIG = {"random", "random_ridge", "magnitude_mass", "magnitude_mass_ridge", "osscar",
-             "osscar_norepair", "mash_medoid_none_delta_f", "mash_merge_sum_delta_f",
-             "mash_ridge_merge_empirical_delta_f", "mash_merge_sum_cylinder"}
+             "osscar_norepair", "mash_medoid_none_delta_f", "mash_medoid_sum_delta_f",
+             "mash_merge_sum_delta_f", "mash_ridge_merge_empirical_delta_f",
+             "mash_full_medoid_empirical_delta_f", "mash_merge_sum_cylinder"}
 
 
 def applicable(arm: str, model: str) -> str | None:

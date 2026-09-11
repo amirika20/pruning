@@ -743,7 +743,8 @@ def realize(units: Units, ok: np.ndarray, clusters: list[list[int]],
             dictionary: str = "merge", repair: str = "sum",
             gauge_correct: bool = True, mu: np.ndarray | None = None,
             Sigma: np.ndarray | None = None, Z: np.ndarray | None = None,
-            bias_fix: bool = False, ridge: float = 1e-8):
+            bias_fix: bool = False, ridge: float = 1e-8,
+            ridge_prior: str = "own"):
     """(rows, biases, columns, keep_slots, bias_delta) for one layer.
 
     `rows`/`biases` are the surviving units' own parameters, `columns` their
@@ -779,7 +780,10 @@ def realize(units: Units, ok: np.ndarray, clusters: list[list[int]],
             # every other rule starts from the cluster's accumulated column.
             col = V[rep] if repair == "none" else w_sum
             u_new, rho_new = units.u[rep], units.rho[rep]
-            keep.append(rep); prior.append(V[rep])
+            # The ridge's centre for a medoid survivor: its OWN column (plain
+            # deletion, OSSCAR's dense-weight centre) or the SUM-rule column, so
+            # that lam -> inf returns medoid+sum rather than medoid+none.
+            keep.append(rep); prior.append(w_sum if ridge_prior == "sum" else V[rep])
         else:
             g = (a[m, None] * units.u[m]).sum(axis=0)
             n = float(np.linalg.norm(g))
@@ -1178,7 +1182,8 @@ class _MashBase(PruningMethod):
                  repair: str | None = None, n_calib: int = 128,
                  gauge_correct: bool = True, bias_fix: bool = False,
                  radius: str = "sup", measure: str | None = None,
-                 max_rows: int = 20000, ridge: float = 1e-8):
+                 max_rows: int = 20000, ridge: float = 1e-8,
+                 repair_rows: int | None = None, ridge_prior: str = "own"):
         if score is not None:
             self.score = score
         if dictionary is not None:
@@ -1207,6 +1212,16 @@ class _MashBase(PruningMethod):
         # value); OSSCAR damps its Hessian at 1e-2, and `mash_ridge_*` arms
         # test that strength here.
         self.ridge = float(ridge)
+        # Row budget for the REPAIR's calibration Grams, decoupled from the
+        # score's `max_rows` so a plan (which keys on max_rows) is reusable.
+        # None = same as max_rows; 0 = every calibration row (OSSCAR accumulates
+        # its Hessian over all ~65k tokens of the same 128 sequences, while the
+        # repair here used a 20000-row subsample -- under three rows per unknown
+        # at OPT-1.3b, where the ridge then just returns its prior).
+        self.repair_rows = None if repair_rows is None else int(repair_rows)
+        if ridge_prior not in ("own", "sum"):
+            raise ValueError("ridge_prior must be 'own' or 'sum'")
+        self.ridge_prior = ridge_prior
         if self.repair == "none" and self.dictionary == "merge":
             raise ValueError("repair='none' needs dictionary='medoid'")
 
@@ -1306,8 +1321,11 @@ class _MashBase(PruningMethod):
         d = units.u.shape[1]
         x0, R, rad = np.zeros(d), 0.0, 0.0
         if needs_Z:
+            rows = self.max_rows
+            if not for_scoring and self.repair_rows is not None:
+                rows = self.repair_rows if self.repair_rows > 0 else 10**12
             Z = _layer_inputs(model, layer_idx, ctx.train_inputs[: self.n_calib],
-                              max_rows=self.max_rows)
+                              max_rows=rows)
             mu = Z.mean(axis=0)
             if needs_sigma:
                 Sigma = np.atleast_2d(np.cov(Z.T))
@@ -1376,7 +1394,7 @@ class _MashBase(PruningMethod):
         rows, biases, cols, keep, delta = realize(
             units, ok, clusters, dictionary=self.dictionary, repair=self.repair,
             gauge_correct=self.gauge_correct, mu=mu, Sigma=Sigma, Z=Z,
-            bias_fix=bias_fix, ridge=self.ridge)
+            bias_fix=bias_fix, ridge=self.ridge, ridge_prior=self.ridge_prior)
 
         H, d = units.u.shape
         # `cols` are EFFECTIVE outgoing weights v = alpha * c, so the consumer

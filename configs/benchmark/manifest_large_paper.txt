@@ -10,6 +10,8 @@ configs/benchmark/generated/imagenet_resnet18/mash_medoid_sum_delta_f.yaml
 configs/benchmark/generated/imagenet_resnet18/mash_medoid_none_delta_f.yaml
 configs/benchmark/generated/imagenet_resnet18/mash_ridge_medoid_empirical_delta_f.yaml
 configs/benchmark/generated/imagenet_resnet18/mash_ridge_medoid_empirical_cylinder.yaml
+configs/benchmark/generated/imagenet_resnet18/mash_full_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/imagenet_resnet18/mash_full_medoid_empirical_cylinder.yaml
 configs/benchmark/generated/imagenet_resnet50/random.yaml
 configs/benchmark/generated/imagenet_resnet50/random_ridge.yaml
 configs/benchmark/generated/imagenet_resnet50/magnitude_mass.yaml
@@ -22,6 +24,8 @@ configs/benchmark/generated/imagenet_resnet50/mash_medoid_sum_delta_f.yaml
 configs/benchmark/generated/imagenet_resnet50/mash_medoid_none_delta_f.yaml
 configs/benchmark/generated/imagenet_resnet50/mash_ridge_medoid_empirical_delta_f.yaml
 configs/benchmark/generated/imagenet_resnet50/mash_ridge_medoid_empirical_cylinder.yaml
+configs/benchmark/generated/imagenet_resnet50/mash_full_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/imagenet_resnet50/mash_full_medoid_empirical_cylinder.yaml
 configs/benchmark/generated/imagenet_mobilenetv2/random.yaml
 configs/benchmark/generated/imagenet_mobilenetv2/random_ridge.yaml
 configs/benchmark/generated/imagenet_mobilenetv2/magnitude_mass.yaml
@@ -34,6 +38,8 @@ configs/benchmark/generated/imagenet_mobilenetv2/mash_medoid_sum_delta_f.yaml
 configs/benchmark/generated/imagenet_mobilenetv2/mash_medoid_none_delta_f.yaml
 configs/benchmark/generated/imagenet_mobilenetv2/mash_ridge_medoid_empirical_delta_f.yaml
 configs/benchmark/generated/imagenet_mobilenetv2/mash_ridge_medoid_empirical_cylinder.yaml
+configs/benchmark/generated/imagenet_mobilenetv2/mash_full_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/imagenet_mobilenetv2/mash_full_medoid_empirical_cylinder.yaml
 configs/benchmark/generated/imagenet_vit_b16/random.yaml
 configs/benchmark/generated/imagenet_vit_b16/random_ridge.yaml
 configs/benchmark/generated/imagenet_vit_b16/magnitude_mass.yaml
@@ -55,6 +61,8 @@ configs/benchmark/generated/imagenet_vit_b16/mash_ridge_medoid_empirical_delta_f
 configs/benchmark/generated/imagenet_vit_b16/mash_ridge_medoid_empirical_cylinder.yaml
 configs/benchmark/generated/imagenet_vit_b16/mash_ridge_gaussian_merge_empirical_delta_f.yaml
 configs/benchmark/generated/imagenet_vit_b16/mash_ridge_gaussian_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/imagenet_vit_b16/mash_full_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/imagenet_vit_b16/mash_full_medoid_empirical_cylinder.yaml
 configs/benchmark/generated/wikitext_opt1.3b/random.yaml
 configs/benchmark/generated/wikitext_opt1.3b/random_ridge.yaml
 configs/benchmark/generated/wikitext_opt1.3b/magnitude_mass.yaml
@@ -76,3 +84,5 @@ configs/benchmark/generated/wikitext_opt1.3b/mash_ridge_medoid_empirical_delta_f
 configs/benchmark/generated/wikitext_opt1.3b/mash_ridge_medoid_empirical_cylinder.yaml
 configs/benchmark/generated/wikitext_opt1.3b/mash_ridge_gaussian_merge_empirical_delta_f.yaml
 configs/benchmark/generated/wikitext_opt1.3b/mash_ridge_gaussian_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/wikitext_opt1.3b/mash_full_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/wikitext_opt1.3b/mash_full_medoid_empirical_cylinder.yaml
