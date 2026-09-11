@@ -201,6 +201,9 @@ ARGS=(--grid "$GRID" --out "$RESULTS_ROOT")
 # sweep_fractions the config carries. Normally leave it unset: the scale-tier
 # entries record their own grid in suite.yaml, and that is what the tables cite.
 [[ -n "${FRACTIONS:-}" ]] && ARGS+=(--fractions $FRACTIONS)
+# RERUN=1 redoes cells whose report.json already exists (e.g. to add a record
+# an older run did not write, such as removals.json).
+[[ "${RERUN:-0}" == 1 ]] && ARGS+=(--rerun)
 
 # PARALLEL CELLS PER GPU. A MASH cell spends its planning pass in host NumPy
 # with the GPU idle (the OPT-1.3b probe: 10 h of plan, 2.5 h of GPU work, and

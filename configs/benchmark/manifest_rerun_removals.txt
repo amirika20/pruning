@@ -1,0 +1,9 @@
+configs/benchmark/generated/mnist_lenet/magnitude_mass.yaml
+configs/benchmark/generated/mnist_lenet/mash_merge_sum_cylinder.yaml
+configs/benchmark/generated/mnist_lenet/mash_medoid_sum_cylinder.yaml
+configs/benchmark/generated/cifar10_resnet20/mash_medoid_sum_delta_f.yaml
+configs/benchmark/generated/cifar10_resnet20/mash_medoid_sum_cylinder.yaml
+configs/benchmark/generated/wikitext_opt125m/mash_merge_sum_cylinder.yaml
+configs/benchmark/generated/wikitext_opt125m/mash_medoid_sum_cylinder.yaml
+configs/benchmark/generated/wikitext_opt350m/mash_merge_sum_cylinder.yaml
+configs/benchmark/generated/wikitext_opt350m/mash_medoid_sum_cylinder.yaml

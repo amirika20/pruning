@@ -414,3 +414,15 @@ sbatch --array=1-10 --time=24:00:00 scripts/slurm_large.sh configs/benchmark/man
 # 6.7b: fp16 load needs 96G host memory; OSSCAR ~17 h
 sbatch --array=1-10 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_paper_big_wikitext_opt6.7b.txt
 ```
+
+## 8. Removal records for the overlap figure (2026-09-11)
+
+Nine paper-set cells finished before removals.json was recorded (LeNet
+magnitude and both cylinder arms; ResNet-20 medoid sum delta_f/cylinder;
+OPT-125m/350m both cylinder arms), so `prelim_overlap` has gaps. Rerun them
+with --rerun (cheap: minutes to ~1 h each); the ResNet-20 cylinder set also
+lacks removals.
+
+```bash
+sbatch --export=ALL,RERUN=1,PARALLEL=3 --cpus-per-task=6 --array=1-3 scripts/slurm_medium.sh configs/benchmark/manifest_rerun_removals.txt
+```
