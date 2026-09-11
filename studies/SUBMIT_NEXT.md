@@ -393,3 +393,24 @@ sbatch --array=1-10 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/ben
 
 Then `python paper/inventory.py --out $PRUNING_SCRATCH/results` until it says
 complete; rerun any block above to fill gaps (finished cells are skipped).
+
+## 7. After the paper-tier run (2026-09-11)
+
+Everything through OPT-1.3b is on disk except two Gaussian merge cells at 1.3b
+(seeds 1-2: the 13 h medoid plan + 10 h merge plan did not fit one 16 h task).
+Sampled planning at 1.3b took 3.5-6.5 h per cell because every step gathered a
+1.3 GB copy of the response matrix; that is fixed (full matvec, no copy --
+identical merge sequences), so a sampled plan there should now be minutes.
+
+```bash
+# 1.3b Gaussian merge arms, seeds 1-2: one sequential task per seed, 24 h wall
+for s in 1 2; do
+  sbatch --export=ALL,SEED=$s --time=24:00:00 scripts/slurm_large.sh configs/benchmark/manifest_paper_wikitext_opt1.3b_gaussian_merge.txt
+done
+# 2.7b: probe one sampled MASH cell first and read its "planned ... in" line;
+# then the whole reduced set, one cell per task
+sbatch --time=24:00:00 scripts/slurm_large.sh configs/benchmark/generated/wikitext_opt2.7b/mash_merge_sum_delta_f.yaml
+sbatch --array=1-10 --time=24:00:00 scripts/slurm_large.sh configs/benchmark/manifest_paper_big_wikitext_opt2.7b.txt
+# 6.7b: fp16 load needs 96G host memory; OSSCAR ~17 h
+sbatch --array=1-10 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_paper_big_wikitext_opt6.7b.txt
+```

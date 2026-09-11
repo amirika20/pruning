@@ -484,7 +484,14 @@ class MashEngine:
             phik = self._Phi[k]
             if self.score == "delta_f":
                 # E[(phi_i - phi_k)^2] = sq_i + sq_k - 2 <phi_i, phi_k>/N: one matvec
-                cross = self._Phi[it] @ phik
+                # over ALL rows, then index the result. `self._Phi[it] @ phik`
+                # gathered a [len(idx), N] COPY of the response matrix first --
+                # 1.3 GB per step at OPT-1.3b (H=8192, N=20000), 8192 steps a
+                # layer -- which is why a sampled plan there took 3.5-6.5 h
+                # against seconds of arithmetic. The full matvec reads the
+                # matrix once and writes nothing; rows of merged-away units are
+                # stale but never selected by `idx`.
+                cross = (self._Phi @ phik)[it]
                 d2 = (self._sq[it] + self._sq[k] - 2.0 * cross / N).clamp_min_(0.0)
                 return self._ward_weight(k, idx) * d2.cpu().numpy()
             # exact_damage: the candidate merged unit's own response is needed,

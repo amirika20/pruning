@@ -1,0 +1,2 @@
+configs/benchmark/generated/wikitext_opt1.3b/mash_gaussian_merge_sum_delta_f.yaml
+configs/benchmark/generated/wikitext_opt1.3b/mash_ridge_gaussian_merge_empirical_delta_f.yaml
