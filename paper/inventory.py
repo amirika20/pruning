@@ -61,7 +61,8 @@ CLAIM_MODELS = {"C4 measure (FC only)": [m for m in MODELS if m in FC]}
 
 BIG = {"wikitext_opt2.7b", "wikitext_opt6.7b"}
 PAPER_BIG = {"random", "random_ridge", "magnitude_mass", "magnitude_mass_ridge", "osscar",
-             "osscar_norepair", "mash_medoid_none_delta_f", "mash_medoid_sum_delta_f",
+             "osscar_norepair", "mash_medoid_none_delta_f", "mash_drop_none_delta_f",
+             "mash_medoid_sum_delta_f",
              "mash_merge_sum_delta_f", "mash_ridge_merge_empirical_delta_f",
              "mash_full_medoid_empirical_delta_f", "mash_merge_sum_cylinder"}
 

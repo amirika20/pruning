@@ -31,7 +31,7 @@ Legend: `3/3` seeds done / wanted, `--` unrunnable by construction, `ARM?` arm n
 | magnitude_mass | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
 | osscar_norepair | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
 | mash_medoid_none_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
-| mash_drop_none_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | -- | -- |
+| mash_drop_none_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
 | mash_medoid_sum_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
 | mash_merge_sum_delta_f | **3/3** | -- | -- | -- | -- | -- | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
 
@@ -80,10 +80,10 @@ Legend: `3/3` seeds done / wanted, `--` unrunnable by construction, `ARM?` arm n
 - **wikitext_opt125m**: complete
 - **wikitext_opt350m**: complete
 - **wikitext_opt1.3b** (2 cells, 4 seed-runs): mash_gaussian_merge_sum_delta_f (+2), mash_ridge_gaussian_merge_empirical_delta_f (+2)
-- **wikitext_opt2.7b** (12 cells, 12 seed-runs): magnitude_mass (+1), magnitude_mass_ridge (+1), mash_full_medoid_empirical_delta_f (+1), mash_medoid_none_delta_f (+1), mash_medoid_sum_delta_f (+1), mash_merge_sum_cylinder (+1), mash_merge_sum_delta_f (+1), mash_ridge_merge_empirical_delta_f (+1), osscar (+1), osscar_norepair (+1), random (+1), random_ridge (+1)
-- **wikitext_opt6.7b** (12 cells, 12 seed-runs): magnitude_mass (+1), magnitude_mass_ridge (+1), mash_full_medoid_empirical_delta_f (+1), mash_medoid_none_delta_f (+1), mash_medoid_sum_delta_f (+1), mash_merge_sum_cylinder (+1), mash_merge_sum_delta_f (+1), mash_ridge_merge_empirical_delta_f (+1), osscar (+1), osscar_norepair (+1), random (+1), random_ridge (+1)
+- **wikitext_opt2.7b** (13 cells, 13 seed-runs): magnitude_mass (+1), magnitude_mass_ridge (+1), mash_drop_none_delta_f (+1), mash_full_medoid_empirical_delta_f (+1), mash_medoid_none_delta_f (+1), mash_medoid_sum_delta_f (+1), mash_merge_sum_cylinder (+1), mash_merge_sum_delta_f (+1), mash_ridge_merge_empirical_delta_f (+1), osscar (+1), osscar_norepair (+1), random (+1), random_ridge (+1)
+- **wikitext_opt6.7b** (13 cells, 13 seed-runs): magnitude_mass (+1), magnitude_mass_ridge (+1), mash_drop_none_delta_f (+1), mash_full_medoid_empirical_delta_f (+1), mash_medoid_none_delta_f (+1), mash_medoid_sum_delta_f (+1), mash_merge_sum_cylinder (+1), mash_merge_sum_delta_f (+1), mash_ridge_merge_empirical_delta_f (+1), osscar (+1), osscar_norepair (+1), random (+1), random_ridge (+1)
 
-**28 seed-runs missing in total.**
+**30 seed-runs missing in total.**
 
 ## Analysis figures (not benchmark cells)
 
