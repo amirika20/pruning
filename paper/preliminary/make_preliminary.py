@@ -116,8 +116,8 @@ def curves_figure(name, note, arms_for, models=MODELS, ncol=4):
             n_seeds = max(n_seeds, int(d.n.max()))
         style(ax, title, metric, n_seeds)
         if n_seeds:
-            ax.legend(frameon=False, fontsize=6.3, ncol=1 if metric == "ppl" else 2,
-                      handlelength=2.2, loc="lower right" if metric == "ppl" else "lower left")
+            ax.legend(frameon=False, fontsize=5.8, ncol=1, handlelength=2.0,
+                      loc="lower right" if metric == "ppl" else "lower left")
     for ax in axes.flat[len(models):]:
         ax.axis("off")
     fig.text(0.01, -0.01, note, fontsize=7, color=INK2, ha="left", va="top")
@@ -129,11 +129,12 @@ def curves_figure(name, note, arms_for, models=MODELS, ncol=4):
 
 def repaired(m):
     dc = dict_for(m)
-    return [("random + ridge repair", "random_ridge", "-", "random"),
-            ("magnitude + ridge repair", "magnitude_mass_ridge", "-", "magnitude"),
+    return [("random + ridge", "random_ridge", "-", "random"),
+            ("magnitude + ridge", "magnitude_mass_ridge", "-", "magnitude"),
             ("OSSCAR (own repair)", "osscar", "-", "OSSCAR"),
-            (f"MASH delta_f ({dc}) + ridge", f"mash_ridge_{dc}_empirical_delta_f", "-", "MASH delta_f"),
-            (f"MASH cylinder ({dc}) + ridge", f"mash_ridge_{dc}_empirical_cylinder", "-", "MASH cylinder")]
+            (f"MASH delta_f {dc}, ridge 20k rows", f"mash_ridge_{dc}_empirical_delta_f", "--", "MASH delta_f"),
+            ("MASH delta_f medoid+sum, ridge all rows", "mash_full_medoid_empirical_delta_f", "-", "MASH delta_f"),
+            ("MASH cylinder medoid+sum, ridge all rows", "mash_full_medoid_empirical_cylinder", "-", "MASH cylinder")]
 
 
 def norepair(m):
@@ -167,6 +168,8 @@ def dictionary(m):
 TIMING_MODELS = ["wikitext_opt350m", "imagenet_vit_b16", "imagenet_resnet50", "wikitext_opt1.3b",
                  "wikitext_opt2.7b", "wikitext_opt6.7b"]
 TIMING_ARMS = [("random", "random_ridge"), ("magnitude", "magnitude_mass_ridge"),
+               ("MASH full-row ridge", "mash_full_medoid_empirical_delta_f"),
+               ("MASH drop", "mash_drop_none_delta_f"),
                ("OSSCAR", "osscar"), ("MASH delete", "mash_medoid_none_delta_f"),
                ("MASH merge+sum", "mash_merge_sum_delta_f"),
                ("MASH medoid+sum", "mash_medoid_sum_delta_f"),
