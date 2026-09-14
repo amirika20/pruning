@@ -20,6 +20,7 @@ from typing import Callable
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from src.data.registry import DatasetBundle
 
@@ -53,6 +54,20 @@ class PrunableModel(nn.Module, abc.ABC):
         """BatchNorm paired with the prunable layer (its output is the
         pre-ReLU activation), or None when the layer feeds ReLU directly."""
         return None
+
+    def activation(self, idx: int) -> Callable[[torch.Tensor], torch.Tensor]:
+        """The nonlinearity applied to prunable layer `idx`'s output before the
+        consumer reads it. Default: ReLU, which is what the merge theory
+        (closed-form Gaussian moments, positive homogeneity, the hyperplane
+        gauge) is written for. An adapter whose network uses something else
+        (GELU in Pythia) returns the network's OWN module here, and the
+        activation-aware paths in src.pruning score and repair on the true
+        responses instead of rectifying the pre-activations.
+
+        Adapters that do NOT override this are treated as ReLU even when the
+        network is not (the recorded ViT/GELU arms rely on that): declaring the
+        activation is what opts a model into the functional path."""
+        return torch.relu
 
     @abc.abstractmethod
     def prune_layer(self, idx: int, indices_to_remove: list[int]) -> "PrunableModel":
@@ -117,6 +132,11 @@ class PrunableModel(nn.Module, abc.ABC):
             f"{type(self).__name__} does not support outgoing-weight merging (supported "
             "for fully-connected-style layers only: mlp, resmlp, transformer)"
         )
+
+
+def is_relu(act: Callable[[torch.Tensor], torch.Tensor]) -> bool:
+    """Whether `act` is the ReLU the closed-form machinery assumes."""
+    return act is torch.relu or act is F.relu or isinstance(act, nn.ReLU)
 
 
 def register_model(name: str) -> Callable[[Callable[..., nn.Module]], Callable[..., nn.Module]]:

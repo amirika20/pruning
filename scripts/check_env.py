@@ -35,6 +35,7 @@ IMPORT_NAME = {"pyyaml": "yaml", "scikit-learn": "sklearn",
 # What each config ingredient needs on top of the core.
 DATA_NEEDS = {"wikitext": ("datasets", "transformers")}
 MODEL_NEEDS = {"opt": ("transformers", "huggingface_hub"),
+               "pythia": ("transformers", "huggingface_hub"),
                "vit": ("torchvision",),
                "mobilenet_v2": ("torchvision",),
                "resnet_imagenet": ("torchvision",),

@@ -57,7 +57,7 @@ data:
   # held-out test splits.
 
 model:
-  kind: mlp                   # registered in src/models/ (mlp, resmlp, cnn, rescnn, resnet_cifar, resnet_imagenet, mobilenet_v2, vit, opt, transformer)
+  kind: mlp                   # registered in src/models/ (mlp, resmlp, cnn, rescnn, resnet_cifar, resnet_imagenet, mobilenet_v2, vit, opt, pythia, transformer)
   params: {hidden_sizes: [512, 256, 128]}
 
 training:  {optimizer: sgd, epochs: 500, lr: 1.0e-3, batch_size: 64, weight_decay: 1.0e-4, log_every: 10}
@@ -174,6 +174,13 @@ Built-in methods:
   `opt` decoder FFNs are the plain FC case (`opt` + the `wikitext` dataset is
   the paper's language setting: one-shot FFN pruning judged by WikiText-2
   perplexity; `opt` is pretrained-only -- epochs > 0 raises).
+  `pythia` (GPT-NeoX, GELU) is the second LM family and the first non-ReLU one:
+  its adapter declares its activation, which switches MASH and the deletion
+  baselines to the activation-aware path (true-response Grams, RMS gauge,
+  medoid dictionary) and makes the ReLU-only arms -- Gaussian measure, merge
+  dictionary, cylinder/certificate, OSSCAR -- raise instead of silently
+  rectifying. Warm up with `scripts/warmup_pythia.py` (see its docstring);
+  the `pythia` arm tier in `configs/benchmark/arms.yaml` lists what runs.
 - **leo_pp** — Serra, Yu, Kumar & Ramalingam, *Scaling Up Exact Neural Network
   Compression by ReLU Stability* (NeurIPS 2021). Exact, lossless, unbudgeted:
   removes only neurons whose ReLU provably never changes sign over the input

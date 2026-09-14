@@ -93,6 +93,35 @@ Two entries are registered. `mash` takes a width (`n_remove`); `mash_certified`
 is the domain-only tier and instead takes a tolerance, choosing its own width
 as the last cut whose certificate stays inside the budget.
 
+ACTIVATION-AWARE ("FUNCTIONAL") PATH. Everything above is written for ReLU:
+the hyperplane gauge (alpha is a free scale), the closed-form moments and the
+merge dictionary all use positive homogeneity. A model whose adapter declares
+a different activation (PrunableModel.activation; Pythia's GELU) is handled by
+the subset of the pipeline that only ever reads the units' post-activation
+RESPONSES phi_i(x) = sigma(w_i^T x + b_i) and their outgoing columns:
+
+    units       alpha_i = RMS of the TRUE response over the calibration rows
+                (there is no gauge to fix, so the response scale plays the
+                role the weight norm plays under ReLU); u = w / alpha,
+                rho = -b / alpha, so that alpha (u^T x - rho) = w^T x + b and
+                the mass a_i = alpha_i ||c_i|| is the unit's RMS output.
+    score       delta_f from sample Grams of the RMS-normalized responses
+                phi_i / alpha_i (the analogue of the unit-gain responses); a
+                cluster's response is its MEDOID's, since that is what is
+                emitted.
+    dictionary  medoid (or drop). `merge` would synthesize sigma(ubar^T x -
+                rhobar) with unit gain, which is not the mean response of the
+                members without homogeneity -- refused.
+    repair      none / sum / empirical on the same normal equations, with
+                G, B formed from the true responses. `sum` transfers each
+                absorbed column scaled by rms_j / rms_rep (the RMS-matched
+                transfer; under ReLU it reduces to the usual sum rule).
+    refused     measure='gaussian', repair kernel/projection, the cylinder
+                score and its certificate, exact_damage.
+
+The ReLU path is untouched: adapters that do not declare an activation are
+treated as ReLU, so every recorded number is reproduced bit for bit.
+
 Run `python -c "from src.pruning.methods.mash import _selftest; _selftest()"`
 for the numerical self-tests.
 """
@@ -110,7 +139,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from scipy.special import ndtr, owens_t
 
-from src.models.registry import PrunableModel
+from src.models.registry import PrunableModel, is_relu
 from src.pruning.registry import (
     PruneContext, PruneDecision, PruningMethod, forward_chunked,
     register_pruning_method)
@@ -256,10 +285,16 @@ class Units:
         return Units(self.u[idx], self.rho[idx], self.alpha[idx], self.C[idx])
 
 
-def extract_units(model: PrunableModel, layer_idx: int) -> tuple[Units, np.ndarray]:
+def extract_units(model: PrunableModel, layer_idx: int,
+                  Z: np.ndarray | None = None) -> tuple[Units, np.ndarray]:
     """(units, ok). `ok` marks rows with ||w|| > 0: a zero-norm unit has no
     hyperplane (sigma(b) is constant), so it is frozen out of merging and
-    carried through untouched."""
+    carried through untouched.
+
+    On a model whose activation is not ReLU (see the module docstring's
+    functional path) the gauge is the RESPONSE scale instead: alpha_i is the
+    RMS of sigma(w_i^T z + b_i) over the calibration rows `Z`, which is then
+    required, and `ok` marks units that respond at all."""
     layer = model.prunable_layer(layer_idx)
     W = layer.weight.data.double().reshape(layer.weight.shape[0], -1).cpu().numpy()
     b = (layer.bias.data.double().cpu().numpy() if layer.bias is not None
@@ -278,7 +313,16 @@ def extract_units(model: PrunableModel, layer_idx: int) -> tuple[Units, np.ndarr
     if C.shape[0] != W.shape[0]:             # patch-major conv consumer
         C = C.reshape(W.shape[0], -1)
 
-    alpha = np.linalg.norm(W, axis=1)
+    act = model.activation(layer_idx)
+    if is_relu(act):
+        alpha = np.linalg.norm(W, axis=1)
+    else:
+        if Z is None:
+            raise ValueError(
+                f"{type(model).__name__} declares a non-ReLU activation for layer "
+                f"{layer_idx}, so its units are gauged by their response RMS and "
+                "extract_units needs the layer inputs Z (see _layer_inputs)")
+        alpha = _response_rms(Z, W, b, act)
     ok = alpha > ZERO_NORM
     safe = np.where(ok, alpha, 1.0)
     return Units(W / safe[:, None], -b / safe, alpha, C), ok
@@ -299,7 +343,8 @@ class MashEngine:
                  x0: np.ndarray | None = None, radius: float | None = None,
                  mu: np.ndarray | None = None, Sigma: np.ndarray | None = None,
                  gauge_correct: bool = True, row_cache: bool = True, measure: str = "gaussian",
-                 Z: np.ndarray | None = None, dictionary: str = "merge"):
+                 Z: np.ndarray | None = None, dictionary: str = "merge",
+                 Phi: torch.Tensor | None = None):
         if score not in SCORES:
             raise ValueError(f"score must be one of {SCORES}, got {score!r}")
         if dictionary not in DICTIONARIES:
@@ -311,8 +356,20 @@ class MashEngine:
             raise ValueError("score='cylinder' needs the input box (x0, radius)")
         if score != "cylinder" and measure == "gaussian" and (mu is None or Sigma is None):
             raise ValueError(f"score={score!r} needs calibration moments (mu, Sigma)")
-        if score != "cylinder" and measure == "empirical" and Z is None:
+        if score != "cylinder" and measure == "empirical" and Z is None and Phi is None:
             raise ValueError("measure='empirical' needs the layer inputs Z")
+        # FUNCTIONAL MODE (module docstring): the responses are handed in
+        # ready-made, [H, N], already RMS-normalized, evaluated with the model's
+        # own activation. Nothing is recomputed from hyperplanes, because
+        # without ReLU's homogeneity a cluster has no synthesized response --
+        # its response is its medoid's. Only the delta_f Ward score is defined.
+        self._fn = Phi is not None
+        if self._fn:
+            if score != "delta_f" or measure != "empirical":
+                raise ValueError("responses given (functional mode): only "
+                                 "score='delta_f' with measure='empirical' is defined")
+            if dictionary != "medoid":
+                raise ValueError("functional mode emits medoids; dictionary must be 'medoid'")
 
         self.orig = units
         self.score = score
@@ -366,9 +423,15 @@ class MashEngine:
             # ONE matmul and a step is one matvec, both in float64 on the
             # device (_gram_device); nothing about the score changes.
             dev = _gram_device()
-            Zt = torch.as_tensor(np.asarray(Z, dtype=np.float64), device=dev)
-            self._Zg = (Zt @ torch.as_tensor(self.g, device=dev).T).T.contiguous()  # [H, N]
-            self._Phi = self._responses(np.arange(H))      # torch [H, N]
+            if self._fn:
+                if Phi.shape[0] != H:
+                    raise ValueError(f"Phi has {Phi.shape[0]} rows for {H} units")
+                self._Zg = None
+                self._Phi = Phi.to(device=dev, dtype=torch.float64).clone()  # [H, N]
+            else:
+                Zt = torch.as_tensor(np.asarray(Z, dtype=np.float64), device=dev)
+                self._Zg = (Zt @ torch.as_tensor(self.g, device=dev).T).T.contiguous()  # [H, N]
+                self._Phi = self._responses(np.arange(H))      # torch [H, N]
             self._sq = (self._Phi * self._Phi).sum(1) / max(self._Phi.shape[1], 1)
         else:
             self.mu = np.asarray(mu, dtype=np.float64)
@@ -633,6 +696,9 @@ class MashEngine:
             row_k_old = self._cost[k].copy()
             row_l_old = self._cost[l].copy()
 
+        fn = getattr(self, "_fn", False)
+        if fn:
+            med_k_old = self._medoid(k)
         self.members[k].extend(self.members[l])
         self.A[k] += self.A[l]
         self.g[k] += self.g[l]
@@ -642,7 +708,14 @@ class MashEngine:
         self._cost[l, :] = np.inf
         self._cost[:, l] = np.inf
 
-        if self.score != "cylinder" and self.measure == "empirical":
+        if fn:
+            # The merged cluster's response is its medoid's. Row k holds the
+            # response of medoid(k) and row l that of medoid(l); the new medoid
+            # is one of those two, so no response is ever recomputed.
+            if self._medoid(k) != med_k_old:
+                self._Phi[k] = self._Phi[l]
+                self._sq[k] = self._sq[l]
+        elif self.score != "cylinder" and self.measure == "empirical":
             self._Zg[k] += self._Zg[l]
             self._Phi[k] = self._responses(np.array([k]))[0]
             self._sq[k] = (self._Phi[k] * self._Phi[k]).sum() / max(self._Phi.shape[1], 1)
@@ -749,13 +822,16 @@ def realize(units: Units, ok: np.ndarray, clusters: list[list[int]],
             gauge_correct: bool = True, mu: np.ndarray | None = None,
             Sigma: np.ndarray | None = None, Z: np.ndarray | None = None,
             bias_fix: bool = False, ridge: float = 1e-8,
-            ridge_prior: str = "own"):
+            ridge_prior: str = "own", act=None):
     """(rows, biases, columns, keep_slots, bias_delta) for one layer.
 
     `rows`/`biases` are the surviving units' own parameters, `columns` their
     consumer columns, `keep_slots` the original index kept for each cluster.
     `Z` (calibration inputs OF THIS LAYER, [N, d]) is required by
     repair='empirical'; (mu, Sigma) by 'projection'/'kernel' and by bias_fix.
+    `act` (functional path) is the model's non-ReLU activation: the units are
+    then RMS-gauged and only the medoid dictionary with repair none / sum /
+    empirical is defined.
     """
     if dictionary not in DICTIONARIES:
         raise ValueError(f"dictionary must be one of {DICTIONARIES}")
@@ -764,6 +840,15 @@ def realize(units: Units, ok: np.ndarray, clusters: list[list[int]],
     if repair == "none" and dictionary != "medoid":
         raise ValueError("repair='none' keeps original units, so it needs "
                          "dictionary='medoid'")
+    if act is not None:
+        if dictionary != "medoid":
+            raise NotImplementedError(
+                "a non-ReLU activation has no synthesized merged unit; use "
+                "dictionary='medoid'")
+        if repair in ("projection", "kernel"):
+            raise NotImplementedError(
+                f"repair={repair!r} evaluates rectified-Gaussian moments; on a "
+                "non-ReLU activation use repair='empirical'")
     a, V = units.mass, units.V
     rows, biases, cols, keep = [], [], [], []
     # The UNREPAIRED column of each survivor: what it carries under repair=none
@@ -828,8 +913,16 @@ def realize(units: Units, ok: np.ndarray, clusters: list[list[int]],
             raise ValueError("repair='empirical' needs the layer inputs Z")
         # G = Phi_keep^T Phi_keep / N, B = Phi_keep^T (Phi_orig * alpha) / N,
         # Ehat = mean Phi_keep, Eh = mean (Phi_orig * alpha) -- on the GPU.
-        G, B, Ehat, Eh = _relu_grams(Z, rows, biases, units.u, -units.rho,
-                                     scale_b=units.alpha)
+        if act is None:
+            G, B, Ehat, Eh = _relu_grams(Z, rows, biases, units.u, -units.rho,
+                                         scale_b=units.alpha)
+        else:
+            # Survivors are medoids, so their gauge is their own alpha; the
+            # originals' responses come out in the true gain (alpha * normalized).
+            G, B, Ehat, Eh = _relu_grams(Z, rows, biases, units.u, -units.rho,
+                                         scale_b=units.alpha, act=act,
+                                         gain_a=units.alpha[np.asarray(keep, dtype=int)],
+                                         gain_b=units.alpha)
     else:
         if mu is None or Sigma is None:
             raise ValueError(f"repair={repair!r} needs calibration moments")
@@ -931,8 +1024,15 @@ def repair_deletion(model: PrunableModel, layer_idx: int, x: torch.Tensor,
             "Gaussian over the layer's inputs, which on conv means a "
             "patch-space covariance -- expensive and misspecified for patches. "
             "Use repair='empirical'.")
+    act = model.activation(layer_idx)
+    fn = not is_relu(act)
+    if fn and repair == "kernel":
+        raise NotImplementedError(
+            "repair='kernel' evaluates rectified-Gaussian moments, and this "
+            f"model's layer {layer_idx} is not ReLU. Use repair='empirical'.")
 
-    units, _ = extract_units(model, layer_idx)
+    Z = _layer_inputs(model, layer_idx, x, max_rows=max_rows)
+    units, _ = extract_units(model, layer_idx, Z=Z if fn else None)
     H = len(units.rho)
     removed = np.asarray(sorted(int(i) for i in removed), dtype=int)
     keep = np.setdiff1d(np.arange(H), removed)
@@ -941,12 +1041,13 @@ def repair_deletion(model: PrunableModel, layer_idx: int, x: torch.Tensor,
     V = units.V
     C_new = units.C.copy()
 
-    Z = _layer_inputs(model, layer_idx, x, max_rows=max_rows)
     if repair in ("empirical", "bias_only"):
         # G = Phi_keep^T Phi_keep / N, B = Phi_keep^T Phi_removed / N and the
         # two column means, formed on the GPU (see _relu_grams).
+        fn_kw = ({"act": act, "gain_a": units.alpha[keep],
+                  "gain_b": units.alpha[removed]} if fn else {})
         G, B, g1, b1 = _relu_grams(Z, units.u[keep], -units.rho[keep],
-                                   units.u[removed], -units.rho[removed])
+                                   units.u[removed], -units.rho[removed], **fn_kw)
     else:
         mu, Sigma = Z.mean(axis=0), np.atleast_2d(np.cov(Z.T))
         mk = UnitMoments(units.u[keep], units.rho[keep], mu, Sigma)
@@ -1011,7 +1112,9 @@ def _gram_device() -> torch.device:
 
 def _relu_grams(Z: np.ndarray, rows_a: np.ndarray, bias_a: np.ndarray,
                 rows_b: np.ndarray, bias_b: np.ndarray,
-                scale_b: np.ndarray | None = None, chunk: int = 4096
+                scale_b: np.ndarray | None = None, chunk: int = 4096,
+                act=None, gain_a: np.ndarray | None = None,
+                gain_b: np.ndarray | None = None,
                 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Sample-average Grams of two rectified unit sets over the inputs Z.
 
@@ -1027,6 +1130,12 @@ def _relu_grams(Z: np.ndarray, rows_a: np.ndarray, bias_a: np.ndarray,
     the 310 s each width cost, against 7 s for the sum rule -- and the same
     step was 887 s per width at OPT-1.3b. Rows of Z stream through in chunks so
     no N x H matrix is ever resident; only the K x K and K x H results return.
+
+    With `act` (functional path) the rows are the RMS-gauged codes and the
+    responses are the model's own nonlinearity in the true gain, normalized
+    back by it:  Phi = act((Z rows^T + bias) * gain) / gain.  Under ReLU that
+    is the expression above to rounding; it is a separate branch so the ReLU
+    path stays bit-identical to the recorded runs.
     """
     dev = _gram_device()
     f64 = dict(dtype=torch.float64, device=dev)
@@ -1040,10 +1149,19 @@ def _relu_grams(Z: np.ndarray, rows_a: np.ndarray, bias_a: np.ndarray,
     ea = torch.zeros(K, **f64)
     eb = torch.zeros(H, **f64)
     N = Zt.shape[0]
+    if act is not None:
+        if gain_a is None or gain_b is None:
+            raise ValueError("act needs gain_a and gain_b (the units' RMS gauges)")
+        ga = torch.as_tensor(np.where(gain_a > TINY, gain_a, 1.0), **f64)
+        gb = torch.as_tensor(np.where(gain_b > TINY, gain_b, 1.0), **f64)
     with torch.no_grad():
         for z in Zt.split(chunk):
-            pa = torch.relu(z @ Ra.T + ba)
-            pb = torch.relu(z @ Rb.T + bb)
+            if act is None:
+                pa = torch.relu(z @ Ra.T + ba)
+                pb = torch.relu(z @ Rb.T + bb)
+            else:
+                pa = act((z @ Ra.T + ba) * ga) / ga
+                pb = act((z @ Rb.T + bb) * gb) / gb
             if sb is not None:
                 pb = pb * sb
             G.addmm_(pa.T, pa)
@@ -1052,6 +1170,43 @@ def _relu_grams(Z: np.ndarray, rows_a: np.ndarray, bias_a: np.ndarray,
             eb += pb.sum(dim=0)
     out = (G / N, B / N, ea / N, eb / N)
     return tuple(t.cpu().numpy() for t in out)
+
+
+def _response_rms(Z: np.ndarray, W: np.ndarray, b: np.ndarray, act,
+                  chunk: int = 4096) -> np.ndarray:
+    """RMS over the rows of Z of the TRUE responses act(Z W^T + b), [H]. The
+    functional path's gauge (extract_units). Streams rows so no N x H matrix
+    is resident; runs on `_gram_device()` in float64."""
+    dev = _gram_device()
+    f64 = dict(dtype=torch.float64, device=dev)
+    Zt = torch.as_tensor(np.ascontiguousarray(Z), **f64)
+    Wt, bt = torch.as_tensor(W, **f64), torch.as_tensor(b, **f64)
+    ss = torch.zeros(Wt.shape[0], **f64)
+    with torch.no_grad():
+        for z in Zt.split(chunk):
+            p = act(z @ Wt.T + bt)
+            ss += (p * p).sum(dim=0)
+    return np.sqrt((ss / max(Zt.shape[0], 1)).cpu().numpy())
+
+
+def _unit_responses(Z: np.ndarray, rows: np.ndarray, biases: np.ndarray,
+                    gains: np.ndarray, act, chunk: int = 4096) -> torch.Tensor:
+    """RMS-normalized true responses act((Z rows^T + biases) * gains) / gains,
+    as a float64 torch tensor [K, N] on `_gram_device()` -- what the
+    functional-mode engine scores. Filled column-block by column-block so the
+    only N x K matrix ever resident is the result itself."""
+    dev = _gram_device()
+    f64 = dict(dtype=torch.float64, device=dev)
+    Zt = torch.as_tensor(np.ascontiguousarray(Z), **f64)
+    R, bb = torch.as_tensor(rows, **f64), torch.as_tensor(biases, **f64)
+    g = torch.as_tensor(np.where(gains > TINY, gains, 1.0), **f64)
+    out = torch.empty((R.shape[0], Zt.shape[0]), **f64)
+    with torch.no_grad():
+        start = 0
+        for z in Zt.split(chunk):
+            out[:, start:start + z.shape[0]] = (act((z @ R.T + bb) * g) / g).T
+            start += z.shape[0]
+    return out
 
 
 def _layer_inputs(model: PrunableModel, layer_idx: int, x: torch.Tensor,
@@ -1263,6 +1418,11 @@ class _MashBase(PruningMethod):
             raise NotImplementedError(
                 f"mash supports nn.Linear and nn.Conv2d prunable layers; "
                 f"layer {layer_idx} is a {type(layer).__name__}")
+        # The functional path (module docstring): the adapter declares a
+        # non-ReLU activation, so units are gauged and scored on their true
+        # responses and the ReLU-only machinery is refused below.
+        act = model.activation(layer_idx)
+        fn = not is_relu(act)
 
         # Resolve the "auto" defaults against THIS layer, so one config can span
         # a mixed architecture. A merged hyperplane cannot be written back
@@ -1271,11 +1431,14 @@ class _MashBase(PruningMethod):
         # space -- so the auto choices are the ones that are both valid and, per
         # the recorded conv results, better there.
         can_merge = (model.prunable_bn(layer_idx) is None
-                     and (not is_conv or layer.bias is not None))
+                     and (not is_conv or layer.bias is not None)
+                     and not fn)
         if self.repair == "none":
             self.dictionary = self.dictionary or "medoid"     # nothing else fits
         self.dictionary = self.dictionary or ("merge" if can_merge else "medoid")
-        self.repair = self.repair or ("empirical" if is_conv else "kernel")
+        self.repair = self.repair or ("empirical" if (is_conv or fn) else "kernel")
+        if fn:
+            self._check_functional(layer_idx, act)
 
         if self.dictionary == "merge":
             if model.prunable_bn(layer_idx) is not None:
@@ -1294,11 +1457,6 @@ class _MashBase(PruningMethod):
                     "dictionary='merge' needs somewhere to put the merged "
                     "unit's offset, and this conv has bias=False. Use "
                     "dictionary='medoid'.")
-
-        units, ok = extract_units(model, layer_idx)
-        idx_map = np.flatnonzero(ok)
-        frozen = np.flatnonzero(~ok)
-        sub = units.subset(idx_map)
 
         # THE SCORE'S MEASURE DEFAULTS TO EMPIRICAL on every layer type (decided
         # 2026-09-10). Conv always did: patch-space Gaussians are misspecified
@@ -1327,10 +1485,13 @@ class _MashBase(PruningMethod):
                         and measure == "gaussian")
                        or self.repair in ("kernel", "projection")
                        or self.bias_fix)
+        # The functional gauge is the response RMS, so it always needs Z --
+        # at emission too, since the medoid (heaviest member) is chosen from
+        # the CURRENT masses and must be gauged the same way the plan was.
         needs_Z = (for_scoring or needs_sigma
-                   or self.repair in ("empirical", "projection"))
+                   or self.repair in ("empirical", "projection") or fn)
         Z = mu = Sigma = None
-        d = units.u.shape[1]
+        d = layer.weight[0].numel()
         x0, R, rad = np.zeros(d), 0.0, 0.0
         if needs_Z:
             rows = self.max_rows
@@ -1345,8 +1506,45 @@ class _MashBase(PruningMethod):
             half = (Z.max(axis=0) - Z.min(axis=0)) / 2.0
             R = float(np.linalg.norm(half))
             rad = R if self.radius == "sup" else R / np.sqrt(d + 2.0)
+
+        units, ok = extract_units(model, layer_idx, Z=Z if fn else None)
+        idx_map = np.flatnonzero(ok)
+        frozen = np.flatnonzero(~ok)
+        sub = units.subset(idx_map)
+
+        # Functional mode scores ready-made responses: the mergeable units'
+        # true responses, RMS-normalized, [H_sub, N] on the Grams' device.
+        Phi = None
+        if fn and for_scoring and len(idx_map):
+            Phi = _unit_responses(Z, sub.u, -sub.rho, sub.alpha, act)
         return (units, ok, idx_map, frozen, sub, Z, mu, Sigma, x0, R, rad,
-                measure)
+                measure, act if fn else None, Phi)
+
+    def _check_functional(self, layer_idx: int, act) -> None:
+        """Refuse the ReLU-only parts of the pipeline on a non-ReLU layer,
+        naming what to use instead (see the module docstring)."""
+        name = (type(act).__name__ if isinstance(act, nn.Module)
+                else getattr(act, "__name__", repr(act)))
+        where = f"layer {layer_idx} has activation {name}, not ReLU"
+        if self.score != "delta_f":
+            raise NotImplementedError(
+                f"score={self.score!r}: {where}. The cylinder score and its "
+                "certificate are pre-activation hyperplane geometry, and "
+                "exact_damage needs a synthesized cluster response; only "
+                "score='delta_f' (sample Grams of the true responses) is defined.")
+        if (self.measure or "empirical") != "empirical":
+            raise NotImplementedError(
+                f"measure={self.measure!r}: {where}. The closed-form moments "
+                "are rectified-Gaussian; use measure='empirical' (the default).")
+        if self.dictionary == "merge":
+            raise NotImplementedError(
+                f"dictionary='merge': {where}. A merged hyperplane realizes the "
+                "members' mean response only under ReLU's homogeneity; use "
+                "dictionary='medoid' (the auto default here) or 'drop'.")
+        if self.repair in ("kernel", "projection"):
+            raise NotImplementedError(
+                f"repair={self.repair!r}: {where}. Use repair='empirical' (the "
+                "auto default here), 'sum' or 'none'.")
 
     @staticmethod
     def _diagnostics(units, H, clusters, keep, recs, idx_map, cert=None):
@@ -1394,7 +1592,7 @@ class _MashBase(PruningMethod):
         return out
 
     def _emit(self, model, layer_idx, units, ok, idx_map, frozen, clusters_sub,
-              Z, mu, Sigma, recs=None, cert=None) -> PruneDecision:
+              Z, mu, Sigma, recs=None, cert=None, act=None) -> PruneDecision:
         clusters = [[int(idx_map[i]) for i in cl] for cl in clusters_sub] \
             + [[int(f)] for f in frozen]
         bias_fix = self.bias_fix and consumer_has_bias(model, layer_idx)
@@ -1406,7 +1604,8 @@ class _MashBase(PruningMethod):
         rows, biases, cols, keep, delta = realize(
             units, ok, clusters, dictionary=self.dictionary, repair=self.repair,
             gauge_correct=self.gauge_correct, mu=mu, Sigma=Sigma, Z=Z,
-            bias_fix=bias_fix, ridge=self.ridge, ridge_prior=self.ridge_prior)
+            bias_fix=bias_fix, ridge=self.ridge, ridge_prior=self.ridge_prior,
+            act=act)
 
         H, d = units.u.shape
         # `cols` are EFFECTIVE outgoing weights v = alpha * c, so the consumer
@@ -1462,7 +1661,7 @@ class _MashBase(PruningMethod):
         """Run the greedy pass ONCE, all the way down. Cutting it afterwards is
         free, which is what lets a single pass serve every target width."""
         (units, ok, idx_map, frozen, sub, Z, mu, Sigma,
-         x0, R, rad, measure) = self._prepare(model, layer_idx, ctx)
+         x0, R, rad, measure, act, Phi) = self._prepare(model, layer_idx, ctx)
         if len(idx_map) < 2:
             # Fewer than two mergeable units, so there is no pair to score. This
             # is REACHABLE, not defensive: a unit's alpha = ||w_row|| is taken
@@ -1479,7 +1678,7 @@ class _MashBase(PruningMethod):
                             idx_map=idx_map, n_mergeable=len(idx_map))
         eng = MashEngine(sub, score=self.score, x0=x0, radius=rad, mu=mu,
                          Sigma=Sigma, gauge_correct=self.gauge_correct,
-                         measure=measure, Z=Z,
+                         measure=measure, Z=Z, Phi=Phi,
                          dictionary="medoid" if self.dictionary == "drop" else self.dictionary)
         recs = eng.dendrogram()
         return MashPlan(layer_idx=layer_idx,
@@ -1496,8 +1695,8 @@ class _MashBase(PruningMethod):
         layer's input space even though its output units are untouched.
         """
         (units, ok, idx_map, frozen, sub, Z, mu, Sigma,
-         x0, R, rad, measure) = self._prepare(model, layer_idx, ctx,
-                                              for_scoring=False)
+         x0, R, rad, measure, act, _) = self._prepare(model, layer_idx, ctx,
+                                                      for_scoring=False)
         if len(idx_map) != plan.n_mergeable or not np.array_equal(idx_map, plan.idx_map):
             # A unit's norm collapsed to zero since planning, so the index
             # mapping no longer lines up. Re-plan rather than mis-apply it.
@@ -1530,7 +1729,8 @@ class _MashBase(PruningMethod):
         recs = plan.recs[:k]
         return self._emit(model, layer_idx, units, ok, idx_map, frozen,
                           clusters, Z, mu, Sigma, recs=recs,
-                          cert=recs[-1].get("certificate") if recs else None)
+                          cert=recs[-1].get("certificate") if recs else None,
+                          act=act)
 
 
 @register_pruning_method("mash")
@@ -1607,7 +1807,7 @@ class MASHCertified(_MashBase):
     def select(self, model: PrunableModel, layer_idx: int,
                ctx: PruneContext) -> PruneDecision:
         (units, ok, idx_map, frozen, sub, Z, mu, Sigma,
-         x0, R, rad, measure) = self._prepare(model, layer_idx, ctx)
+         x0, R, rad, measure, _act, _Phi) = self._prepare(model, layer_idx, ctx)
         H = len(idx_map)
         if H <= 1:
             return PruneDecision(remove=[])
@@ -1998,6 +2198,191 @@ def _selftest() -> None:  # pragma: no cover
     else:
         raise AssertionError("merge under BatchNorm must be refused")
 
+    # ── the functional (non-ReLU) path ───────────────────────────────────
+    # A GELU FFN block, declared through PrunableModel.activation. Everything
+    # below reads the true responses; nothing may rectify a pre-activation.
+    import copy
+
+    from src.models.registry import PrunableModel as _PM
+    from src.pruning.surgery import apply_decision
+
+    class _GeluFFN(_PM):
+        def __init__(self, d, H, m):
+            super().__init__()
+            self.fc1, self.act, self.fc2 = nn.Linear(d, H), nn.GELU(), nn.Linear(H, m)
+
+        def forward(self, x):
+            return self.fc2(self.act(self.fc1(x)))
+
+        def n_prunable_layers(self):
+            return 1
+
+        def prunable_layer(self, idx):
+            return self.fc1
+
+        def outgoing_module(self, idx):
+            return self.fc2
+
+        def outgoing_weights(self, idx):
+            return self.fc2.weight.detach().t()
+
+        def activation(self, idx):
+            return self.act
+
+        def merge_outgoing(self, idx, merges):
+            out = copy.deepcopy(self)
+            for op in merges:
+                out.fc2.weight.data[:, op.survivor] += op.scale * out.fc2.weight.data[:, op.removed]
+            return out
+
+        def prune_layer(self, idx, remove):
+            out = copy.deepcopy(self)
+            keep = sorted(set(range(self.fc1.out_features)) - set(remove))
+            f1, f2 = nn.Linear(self.fc1.in_features, len(keep)), nn.Linear(len(keep), self.fc2.out_features)
+            f1.weight.data, f1.bias.data = out.fc1.weight.data[keep].clone(), out.fc1.bias.data[keep].clone()
+            f2.weight.data, f2.bias.data = out.fc2.weight.data[:, keep].clone(), out.fc2.bias.data.clone()
+            out.fc1, out.fc2 = f1, f2
+            return out
+
+    torch.manual_seed(1)
+    dg, Hg, mg = 8, 14, 5
+    gnet = _GeluFFN(dg, Hg, mg).double().eval()
+    with torch.no_grad():
+        # exact duplicates 2,3 and 9,10 (a SCALED copy is not a duplicate
+        # under GELU, so these are equal rows, not proportional ones)
+        for a_, b_ in ((2, 3), (9, 10)):
+            gnet.fc1.weight[b_] = gnet.fc1.weight[a_]
+            gnet.fc1.bias[b_] = gnet.fc1.bias[a_]
+        # a DEAD unit (zero row AND zero bias -> gelu(0) = 0 everywhere) is
+        # frozen; a zero row with a bias is a CONSTANT unit, which under the
+        # response gauge has nonzero RMS and stays mergeable (the repair can
+        # fold it into the consumer bias) -- unlike the ReLU gauge, where
+        # "no hyperplane" is the criterion.
+        gnet.fc1.weight[7] = 0.0
+        gnet.fc1.bias[7] = 0.0
+        gnet.fc1.weight[12] = 0.0
+        gnet.fc1.bias[12] = 0.9
+    Xg = torch.randn(400, dg, dtype=torch.float64)
+    Xh = torch.randn(400, dg, dtype=torch.float64)   # held out
+
+    class _GB:
+        train_ds = TensorDataset(Xg, torch.zeros(len(Xg), dtype=torch.long))
+
+    gctx = PruneContext(train_inputs=Xg, bundle=_GB(), device=torch.device("cpu"))
+
+    # gauge: alpha is the response RMS, and the frozen unit is frozen
+    Zg = _layer_inputs(gnet, 0, Xg)
+    gu, gok = extract_units(gnet, 0, Z=Zg)
+    with torch.no_grad():
+        true_resp = gnet.act(gnet.fc1(Xg)).numpy()
+    assert np.allclose(gu.alpha, np.sqrt((true_resp ** 2).mean(axis=0))), "alpha must be the response RMS"
+    assert not gok[7] and gok[12] and gok.sum() == Hg - 1, \
+        "dead GELU unit must be frozen, constant one must not"
+    assert np.allclose(gu.alpha[:, None] * gu.u, gnet.fc1.weight.detach().numpy()), "alpha*u must recover w"
+    try:
+        extract_units(gnet, 0)
+    except ValueError as exc:
+        assert "Z" in str(exc)
+    else:
+        raise AssertionError("functional extract_units without Z must raise")
+
+    # the response matrix the engine scores is the true response, normalized
+    sub_g = gu.subset(np.flatnonzero(gok))
+    Phi_g = _unit_responses(Zg, sub_g.u, -sub_g.rho, sub_g.alpha, gnet.act).cpu().numpy()
+    want = (true_resp[:, gok] / gu.alpha[None, gok]).T
+    assert np.allclose(Phi_g, want, atol=1e-12), "engine responses must be the normalized true responses"
+
+    # duplicates are free and merge first; the sum rule on a duplicate is exact
+    with torch.no_grad():
+        gref = gnet(Xg)
+    m_dup = MASH(n_remove=2, score="delta_f", dictionary="medoid", repair="sum")
+    dec = m_dup.select(gnet, 0, gctx)
+    # one of each duplicate pair goes (the lighter one -- the medoid is the
+    # heavier, and the two have equal alpha but different outgoing columns)
+    assert (len(dec.remove) == 2 and len(set(dec.remove) & {2, 3}) == 1
+            and len(set(dec.remove) & {9, 10}) == 1), f"duplicates must go first, removed {dec.remove}"
+    grecs = m_dup.plan(gnet, 0, gctx).recs
+    gscale = float(np.median([r["cost"] for r in grecs[2:]]))
+    assert all(abs(r["cost"]) < 1e-12 * gscale for r in grecs[:2]), \
+        f"duplicate GELU units must be free: {[r['cost'] for r in grecs[:3]]}"
+    pr, _, _ = apply_decision(gnet, 0, dec)
+    pr = pr.prune_layer(0, dec.remove)
+    with torch.no_grad():
+        err = float((pr(Xg) - gref).abs().max())
+    assert err < 1e-10, f"GELU duplicate merge + sum rule must be exact, got {err:.2e}"
+    assert pr.fc1.out_features == Hg - 2
+
+    # auto defaults resolve to medoid + empirical on a GELU layer, and the
+    # ReLU-only knobs are refused with a pointer to what to use
+    m_auto = MASH(n_remove=4)
+    m_auto.select(gnet, 0, gctx)
+    assert (m_auto.dictionary, m_auto.repair) == ("medoid", "empirical"), (m_auto.dictionary, m_auto.repair)
+    for bad in (dict(dictionary="merge"), dict(score="cylinder"), dict(score="exact_damage"),
+                dict(measure="gaussian"), dict(repair="kernel"), dict(repair="projection")):
+        try:
+            MASH(n_remove=4, **bad).select(gnet, 0, gctx)
+        except NotImplementedError as exc:
+            assert "not ReLU" in str(exc), str(exc)
+        else:
+            raise AssertionError(f"{bad} must be refused on a GELU layer")
+    try:
+        MASHCertified(tol=0.1).select(gnet, 0, gctx)
+    except NotImplementedError:
+        pass
+    else:
+        raise AssertionError("the certified tier must be refused on a GELU layer")
+    try:
+        repair_deletion(gnet, 0, Xg, [1, 2], repair="kernel")
+    except NotImplementedError:
+        pass
+    else:
+        raise AssertionError("kernel repair of a deletion must be refused on GELU")
+
+    # repair ordering on the TRUE function: empirical (a global least squares
+    # over the survivors' true responses) <= sum <= none, in-sample; and the
+    # empirical solve is the optimum -- the residual is orthogonal to the
+    # survivors' responses.
+    def _layer_err(model, X):
+        with torch.no_grad():
+            return float(((model(X) - (gref if X is Xg else gnet(X))) ** 2).mean())
+
+    errs = {}
+    for rep in ("none", "sum", "empirical"):
+        m = MASH(n_remove=5, score="delta_f", dictionary="medoid", repair=rep, ridge=1e-12,
+                 n_calib=len(Xg))            # every row, so the solve is in-sample
+        dec = m.select(gnet, 0, gctx)
+        pr, _, _ = apply_decision(gnet, 0, dec)
+        pr = pr.prune_layer(0, dec.remove)
+        errs[rep] = _layer_err(pr, Xg)
+        if rep == "empirical":
+            with torch.no_grad():
+                resid = (pr(Xg) - gref)                      # [N, m]
+                surv = pr.act(pr.fc1(Xg))                    # [N, K]
+                # normal equations: surv^T resid = 0 per output (with the
+                # constant adjoined since fc2 has a bias -> mean resid = 0)
+                orth = float((surv.T @ resid).abs().max() / len(Xg))
+            assert orth < 1e-8, f"empirical repair residual not orthogonal: {orth:.2e}"
+    assert errs["empirical"] <= errs["sum"] + 1e-12 and errs["empirical"] <= errs["none"] + 1e-12, errs
+
+    # the deletion primitive on GELU: magnitude-style removal + empirical
+    # repair is also the least-squares optimum on the true responses
+    C_new, const = repair_deletion(gnet, 0, Xg, [0, 4, 11], repair="empirical", ridge=1e-12)
+    pr = gnet.set_outgoing_weights(0, torch.from_numpy(C_new))
+    pr = pr.add_outgoing_bias(0, torch.from_numpy(const)).prune_layer(0, [0, 4, 11])
+    with torch.no_grad():
+        resid = pr(Xg) - gref
+        surv = pr.act(pr.fc1(Xg))
+        orth = float((surv.T @ resid).abs().max() / len(Xg))
+        assert abs(float(resid.mean(0).abs().max())) < 1e-8, "constant must zero the mean residual"
+    assert orth < 1e-8, f"repair_deletion on GELU is not the least-squares optimum: {orth:.2e}"
+    naive = gnet.prune_layer(0, [0, 4, 11])
+    assert _layer_err(pr, Xg) <= _layer_err(naive, Xg), "repaired deletion must beat naive deletion"
+
+    # drop dictionary plans as medoid and deletes whole clusters
+    dd = MASH(n_remove=4, score="delta_f", dictionary="drop").select(gnet, 0, gctx)
+    assert set(dd.remove) >= {2, 3} or set(dd.remove) >= {9, 10}, dd.remove
+    assert dd.new_outgoing is None
+
     print("mash.py self-tests passed:")
     print("  arc-cosine identity, c=+-1 branches, cross kernel vs Monte Carlo")
     print("  mass gauge invariance; duplicate hyperplanes free in all 3 scores")
@@ -2015,6 +2400,9 @@ def _selftest() -> None:  # pragma: no cover
     print("  a layer with 0 or 1 mergeable units plans and emits empty, not raises")
     print("  conv+BN: patch extraction, medoid path, bit-exact zero removal,")
     print("    BN mode preserved, merge-under-BN refused with a pointer")
+    print("  GELU (functional path): RMS gauge, true-response scoring, duplicate")
+    print("    merge exact, empirical repair = least-squares optimum, ReLU-only")
+    print("    knobs refused, auto defaults -> medoid + empirical")
 
 
 if __name__ == "__main__":

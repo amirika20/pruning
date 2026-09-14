@@ -174,6 +174,25 @@ paper_big:
   - mash_full_medoid_empirical_delta_f
   - mash_merge_sum_cylinder
 
+# NON-ReLU LMs (Pythia, GELU; decided 2026-09-13): the arms whose selection
+# and repair read only the units' post-activation RESPONSES and outgoing
+# columns -- the "functional" subset of MASH (see the mash.py docstring). No
+# Gaussian measure, no merge dictionary, no cylinder/certificate, no OSSCAR
+# (its Hessian target assumes the rectified FFN); the ReLU-only arms raise
+# NotImplementedError on these entries and are simply not listed here.
+# `--tier pythia` / `arms_tier: pythia`.
+pythia:
+  - random
+  - random_ridge
+  - magnitude_mass
+  - magnitude_mass_ridge
+  - mash_medoid_none_delta_f
+  - mash_drop_none_delta_f
+  - mash_medoid_sum_delta_f
+  - mash_medoid_empirical_delta_f
+  - mash_ridge_medoid_empirical_delta_f
+  - mash_full_medoid_empirical_delta_f
+
 # ── explicit arms ────────────────────────────────────────────────────────────
 arms:
 

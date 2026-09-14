@@ -52,7 +52,7 @@ import torch
 
 from src.models.registry import PrunableModel
 from src.pruning.methods.mash import (
-    TINY, extract_units, repair_deletion, reshape_outgoing)
+    TINY, _layer_inputs, extract_units, repair_deletion, reshape_outgoing)
 from src.pruning.registry import (
     PruneContext, PruneDecision, PruningMethod, register_pruning_method)
 
@@ -150,9 +150,25 @@ class MagnitudePruning(_Baseline):
             raise ValueError(f"norm must be one of {NORMS}, got {norm!r}")
         self.norm = norm
 
-    def scores(self, model: PrunableModel, layer_idx: int) -> np.ndarray:
-        """Per-unit importance; larger = keep. BatchNorm is folded in."""
-        units, ok = extract_units(model, layer_idx)
+    def scores(self, model: PrunableModel, layer_idx: int,
+               ctx: PruneContext | None = None) -> np.ndarray:
+        """Per-unit importance; larger = keep. BatchNorm is folded in.
+
+        On a non-ReLU layer (PrunableModel.activation; Pythia's GELU) the
+        gauge alpha_i is the unit's response RMS over the calibration inputs
+        rather than its weight norm (see mash.extract_units), so `mass` is the
+        unit's RMS OUTPUT ||c_i|| rms(phi_i) -- the activation-aware magnitude
+        criterion -- and `ctx` is then required for the inputs."""
+        from src.models.registry import is_relu
+
+        Z = None
+        if not is_relu(model.activation(layer_idx)):
+            if ctx is None:
+                raise ValueError("magnitude scores on a non-ReLU layer need the "
+                                 "calibration inputs (ctx)")
+            Z = _layer_inputs(model, layer_idx, ctx.train_inputs[: self.n_calib],
+                              max_rows=self.max_rows)
+        units, ok = extract_units(model, layer_idx, Z=Z)
         if self.norm == "mass":
             v = units.mass
         elif self.norm == "w":
@@ -166,7 +182,7 @@ class MagnitudePruning(_Baseline):
         return np.where(ok, v, -np.inf)
 
     def _order(self, model, layer_idx, ctx) -> np.ndarray:
-        return np.argsort(self.scores(model, layer_idx), kind="stable")
+        return np.argsort(self.scores(model, layer_idx, ctx), kind="stable")
 
 
 # ── self-tests ───────────────────────────────────────────────────────────────

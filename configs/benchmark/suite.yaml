@@ -307,6 +307,68 @@ entries:
     # synthesized hyperplane; deletion-only arms do not.
     model: {kind: opt, params: {size: 13b, pretrained: true, dtype: float16}}
 
+  # ── WikiText-2 / Pythia (GPT-NeoX, GELU): downloaded (HuggingFace) ────────
+  # The second LM family, and the first NON-ReLU one. The FFN is the same
+  # single-producer / single-consumer Linear pair as OPT, so the surgery is
+  # unchanged, but the activation is GELU: the adapter declares it and MASH
+  # runs its functional path (true-response Grams, RMS gauge, medoid
+  # dictionary). Only the `pythia` arm tier applies -- the ReLU-only arms
+  # (Gaussian measure, merge dictionary, cylinder, OSSCAR) raise here.
+  # Every Pythia size shares one tokenizer; pythia-70m's serves them all.
+  # FFN widths: 160m 12x3072, 410m 24x4096, 1.4b 24x8192, 2.8b 32x10240,
+  # 6.9b 32x16384. fp32 footprint ~4 bytes/param: 1.4b ~6GB, 2.8b ~11GB,
+  # 6.9b ~28GB (load fp16, the training dtype).
+  - name: wikitext_pythia160m
+    arms_tier: pythia
+    family: fc
+    resources: medium
+    analyze_geometry: false
+    data: {kind: wikitext, params: {tokenizer: EleutherAI/pythia-70m, seq_len: 512,
+                                    n_train: 128, n_val: 32, n_test: 128}}
+    model: {kind: pythia, params: {size: 160m, pretrained: true}}
+
+  - name: wikitext_pythia410m
+    arms_tier: pythia
+    family: fc
+    resources: medium
+    analyze_geometry: false
+    data: {kind: wikitext, params: {tokenizer: EleutherAI/pythia-70m, seq_len: 512,
+                                    n_train: 128, n_val: 32, n_test: 128}}
+    model: {kind: pythia, params: {size: 410m, pretrained: true}}
+
+  - name: wikitext_pythia1.4b
+    arms_tier: pythia
+    sweep_fractions: [0.02, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50, 0.65, 0.80]
+    family: fc
+    resources: large
+    analyze_geometry: false
+    data: {kind: wikitext, params: {tokenizer: EleutherAI/pythia-70m, seq_len: 512,
+                                    n_train: 128, n_val: 32, n_test: null}}
+    model: {kind: pythia, params: {size: 1.4b, pretrained: true}}
+
+  - name: wikitext_pythia2.8b
+    arms_tier: pythia
+    sweep_fractions: [0.02, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50, 0.65, 0.80]
+    family: fc
+    resources: large
+    analyze_geometry: false
+    data: {kind: wikitext, params: {tokenizer: EleutherAI/pythia-70m, seq_len: 512,
+                                    n_train: 128, n_val: 32, n_test: null}}
+    model: {kind: pythia, params: {size: 2.8b, pretrained: true}}
+
+  - name: wikitext_pythia6.9b
+    arms_tier: pythia
+    sweep_fractions: [0.02, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50, 0.65, 0.80]
+    family: fc
+    resources: large
+    analyze_geometry: false
+    data: {kind: wikitext, params: {tokenizer: EleutherAI/pythia-70m, seq_len: 512,
+                                    n_train: 128, n_val: 32, n_test: null}}
+    # fp16 is the dtype Pythia was trained in; halves 28 GiB of resident weights.
+    # The medoid dictionary emits only ORIGINAL rows, so no synthesized unit is
+    # ever rounded -- only the re-solved consumer columns carry fp16 rounding.
+    model: {kind: pythia, params: {size: 6.9b, pretrained: true, dtype: float16}}
+
 # ── defaults applied to every generated config ──────────────────────────────
 defaults:
   seeds: [0, 1, 2]

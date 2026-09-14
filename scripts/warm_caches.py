@@ -21,9 +21,9 @@ RE-RUNNING IS CHEAP AND NEVER RE-DOWNLOADS.
     into tensors. --force re-materializes (5.2s for MNIST) without re-fetching.
   * snapshot_download is incremental: complete files are left alone, so an
     interrupted weights download resumes rather than restarting.
-  * the six WikiText entries share one raw dataset, so the first warms it and the
-    rest skip. Their per-size tokenizers come from the weights pass, which pulls
-    *.json/*.txt/*.model alongside the checkpoint.
+  * the WikiText entries (OPT and Pythia) share one raw dataset, so the first
+    warms it and the rest skip. Their per-size tokenizers come from the weights
+    pass, which pulls *.json/*.txt/*.model alongside the checkpoint.
 
 Compute nodes are frequently network-isolated, and the job scripts export
 HF_HUB_OFFLINE=1 so a cold cache fails loudly rather than hanging on a blocked
@@ -189,8 +189,10 @@ def main() -> None:
     print(f"{len(todo)} {what}(s) to warm\n")
     if not args.datasets:
         big = [e["name"] for e in todo
-               if e["model"]["kind"] == "opt"
-               and e["model"]["params"].get("size") in ("6.7b", "13b")]
+               if (e["model"]["kind"] == "opt"
+                   and e["model"]["params"].get("size") in ("6.7b", "13b"))
+               or (e["model"]["kind"] == "pythia"
+                   and e["model"]["params"].get("size") in ("6.9b", "12b"))]
         if big:
             print(f"note: {', '.join(big)} are tens of GB of weights each; "
                   f"they land under {os.environ['HF_HOME']}\n"
@@ -220,7 +222,7 @@ def main() -> None:
         params = dict(e["model"]["params"])
         print(f"--- {e['name']}: {kind} {params}")
         try:
-            if kind == "opt":
+            if kind in ("opt", "pythia"):
                 # FETCH THE FILES, DO NOT BUILD THE MODEL. from_pretrained
                 # materializes the weights in RAM -- 13b is ~52GB in fp32 -- which
                 # gets OOM-killed on a login node after the download has already
@@ -228,8 +230,12 @@ def main() -> None:
                 # cache, which is all a compute node needs.
                 from huggingface_hub import HfApi, snapshot_download
 
-                from src.models.opt import OPT_SIZES
-                repo = OPT_SIZES[params["size"]]
+                if kind == "opt":
+                    from src.models.opt import OPT_SIZES
+                    repo = OPT_SIZES[params["size"]]
+                else:
+                    from src.models.pythia import pythia_repo
+                    repo = pythia_repo(params["size"], bool(params.get("deduped", False)))
                 files = HfApi().list_repo_files(repo)
                 # Mirror what transformers prefers at load time, so the node
                 # finds the format it looks for first.
