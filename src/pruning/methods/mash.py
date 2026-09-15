@@ -129,6 +129,7 @@ for the numerical self-tests.
 from __future__ import annotations
 
 import logging
+import time
 import os
 from dataclasses import dataclass
 from typing import Any, Sequence
@@ -1726,8 +1727,10 @@ class _MashBase(PruningMethod):
              ctx: PruneContext) -> MashPlan:
         """Run the greedy pass ONCE, all the way down. Cutting it afterwards is
         free, which is what lets a single pass serve every target width."""
+        t_prep = time.perf_counter()
         (units, ok, idx_map, frozen, sub, Z, mu, Sigma,
          x0, R, rad, measure, act, Phi) = self._prepare(model, layer_idx, ctx)
+        t_prep = time.perf_counter() - t_prep
         if len(idx_map) < 2:
             # Fewer than two mergeable units, so there is no pair to score. This
             # is REACHABLE, not defensive: a unit's alpha = ||w_row|| is taken
@@ -1742,12 +1745,24 @@ class _MashBase(PruningMethod):
                 "(earlier pruning collapsed the rest); nothing to plan")
             return MashPlan(layer_idx=layer_idx, pairs=[], recs=[],
                             idx_map=idx_map, n_mergeable=len(idx_map))
+        t_eng = time.perf_counter()
         eng = MashEngine(sub, score=self.score, x0=x0, radius=rad, mu=mu,
                          Sigma=Sigma, gauge_correct=self.gauge_correct,
                          measure=measure, Z=Z, Phi=Phi,
                          dictionary="medoid" if self.dictionary == "drop" else self.dictionary,
                          track_certificate=self.track_certificate)
+        eng_init_seconds = time.perf_counter() - t_eng
+        t_prep_end = time.perf_counter()
         recs = eng.dendrogram()
+        t_loop = time.perf_counter() - t_prep_end
+        # Where a layer's plan time goes: collecting Z / responses, building the
+        # engine (initial H x H cost matrix), and the greedy loop itself. The
+        # cluster's per-layer times did not match local profiles (Pythia-1.4b:
+        # 12 min a layer at H=8192 against 1 min at H=16384 for OPT-6.7b), and
+        # the split is what tells which part is slow there.
+        logging.info(f"  layer {layer_idx}: plan phases -- prepare {t_prep:.1f}s, "
+                     f"engine init {eng_init_seconds:.1f}s, greedy loop {t_loop:.1f}s "
+                     f"({len(recs)} steps, {1000.0 * t_loop / max(len(recs), 1):.1f} ms/step)")
         return MashPlan(layer_idx=layer_idx,
                         pairs=[(r["survivor"], r["removed"]) for r in recs],
                         recs=recs, idx_map=idx_map, n_mergeable=len(idx_map),
