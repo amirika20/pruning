@@ -10,15 +10,3 @@ configs/benchmark/generated/wikitext_pythia2.8b/mash_medoid_none_delta_f.yaml
 configs/benchmark/generated/wikitext_pythia2.8b/mash_ridge_medoid_empirical_delta_f.yaml
 configs/benchmark/generated/wikitext_pythia2.8b/mash_drop_none_delta_f.yaml
 configs/benchmark/generated/wikitext_pythia2.8b/mash_full_medoid_empirical_delta_f.yaml
-configs/benchmark/generated/wikitext_pythia6.9b/random.yaml
-configs/benchmark/generated/wikitext_pythia6.9b/random_ridge.yaml
-configs/benchmark/generated/wikitext_pythia6.9b/magnitude_mass.yaml
-configs/benchmark/generated/wikitext_pythia6.9b/magnitude_mass_ridge.yaml
-configs/benchmark/generated/wikitext_pythia6.9b/osscar.yaml
-configs/benchmark/generated/wikitext_pythia6.9b/osscar_norepair.yaml
-configs/benchmark/generated/wikitext_pythia6.9b/mash_medoid_sum_delta_f.yaml
-configs/benchmark/generated/wikitext_pythia6.9b/mash_medoid_empirical_delta_f.yaml
-configs/benchmark/generated/wikitext_pythia6.9b/mash_medoid_none_delta_f.yaml
-configs/benchmark/generated/wikitext_pythia6.9b/mash_ridge_medoid_empirical_delta_f.yaml
-configs/benchmark/generated/wikitext_pythia6.9b/mash_drop_none_delta_f.yaml
-configs/benchmark/generated/wikitext_pythia6.9b/mash_full_medoid_empirical_delta_f.yaml

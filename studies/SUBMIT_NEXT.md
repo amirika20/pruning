@@ -541,3 +541,24 @@ sbatch --export=ALL,SEED=0,RERUN=1,NO_PLAN_REUSE=1 --time=00:45:00 scripts/slurm
 ```
 Send the two "loop profile" lines. (The cell is left unchanged: the 45 min
 wall kills it before it rewrites anything, and its report.json stays.)
+
+## 15. Pythia-2.8b and 6.9b (2026-09-15)
+
+Same 12-arm `pythia` tier, two seeds, 10-point grid. Weights first, from a
+login node: `python scripts/warmup_pythia.py --download 2.8b 6.9b`. Planning
+is the cost (loop still at 41 ms/step on an H100 at width 8192, unexplained --
+see §14), so plan ONCE per seed: stage 1 = the planning arm plus the
+baselines and OSSCAR; stage 2 = the other five MASH arms, which reuse the
+dendrogram. Use the H100 partition (planning is 2x faster there, 6.9b's fp16
+weights need the 80 GB card, and the pehlevan account must be given explicitly
+if the partition's default is not it).
+
+```bash
+for s in 0 1; do
+  j=$(sbatch --parsable --partition=kempner_h100 --export=ALL,SEED=$s --array=1-7 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_pythia_pythia2.8b_stage1.txt)
+  sbatch --dependency=afterany:$j --partition=kempner_h100 --export=ALL,SEED=$s --array=1-5 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_pythia_pythia2.8b_stage2.txt
+done
+```
+6.9b: at the current loop rate a width-16384 plan is ~20 h per seed and may
+not fit 24 h even with checkpoints on the first submission; wait for the §14
+profile and its fix, then the same two lines with `pythia6.9b`.

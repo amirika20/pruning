@@ -28,13 +28,14 @@ BENCH = ROOT / "configs" / "benchmark"
 MODELS = ["mnist_lenet", "cifar10_resnet20", "cifar10_resnet56",
           "imagenet_resnet18", "imagenet_resnet50", "imagenet_mobilenetv2", "imagenet_vit_b16",
           "wikitext_opt125m", "wikitext_opt350m", "wikitext_opt1.3b", "wikitext_opt2.7b",
-          "wikitext_opt6.7b", "wikitext_pythia1.4b"]
+          "wikitext_opt6.7b", "wikitext_pythia1.4b", "wikitext_pythia2.8b", "wikitext_pythia6.9b"]
 FC = {"imagenet_vit_b16", "wikitext_opt125m", "wikitext_opt350m", "wikitext_opt1.3b",
       "wikitext_opt2.7b", "wikitext_opt6.7b"}
 BN = {"cifar10_resnet20", "cifar10_resnet56", "imagenet_resnet18", "imagenet_resnet50",
       "imagenet_mobilenetv2"}
 WANT_SEEDS = {m: 3 for m in MODELS}
-WANT_SEEDS.update({"wikitext_opt2.7b": 1, "wikitext_opt6.7b": 1, "wikitext_pythia1.4b": 2})
+WANT_SEEDS.update({"wikitext_opt2.7b": 1, "wikitext_opt6.7b": 1, "wikitext_pythia1.4b": 2,
+                   "wikitext_pythia2.8b": 2, "wikitext_pythia6.9b": 2})
 
 CLAIMS = {
     "C1a overlap (removal sets)": ["mash_medoid_none_delta_f", "osscar_norepair", "magnitude_mass"],
@@ -69,7 +70,7 @@ PAPER_BIG = {"random", "random_ridge", "magnitude_mass", "magnitude_mass_ridge",
 
 # Pythia (GELU): the functional path -- delta_f from sample Grams, medoid
 # dictionary, empirical/ridge repair -- plus the activation-agnostic baselines.
-PYTHIA = {"wikitext_pythia1.4b"}
+PYTHIA = {"wikitext_pythia1.4b", "wikitext_pythia2.8b", "wikitext_pythia6.9b"}
 PAPER_PYTHIA = {"random", "random_ridge", "magnitude_mass", "magnitude_mass_ridge", "osscar",
                 "osscar_norepair", "mash_medoid_none_delta_f", "mash_drop_none_delta_f",
                 "mash_medoid_sum_delta_f", "mash_ridge_medoid_empirical_delta_f",

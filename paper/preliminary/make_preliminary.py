@@ -45,12 +45,14 @@ MODELS = [  # (cell prefix, title, metric)
     ("wikitext_opt2.7b", "OPT-2.7b / WikiText-2", "ppl"),
     ("wikitext_opt6.7b", "OPT-6.7b / WikiText-2", "ppl"),
     ("wikitext_pythia1.4b", "Pythia-1.4b (GELU) / WikiText-2", "ppl"),
+    ("wikitext_pythia2.8b", "Pythia-2.8b (GELU) / WikiText-2", "ppl"),
+    ("wikitext_pythia6.9b", "Pythia-6.9b (GELU) / WikiText-2", "ppl"),
 ]
 FC = {"imagenet_vit_b16", "wikitext_opt125m", "wikitext_opt350m", "wikitext_opt1.3b",
       "wikitext_opt2.7b", "wikitext_opt6.7b"}
 # Pythia is fully connected but GELU: the functional path allows only the medoid
 # dictionary, so its MASH arms are the medoid ones.
-MEDOID_ONLY_FC = {"wikitext_pythia1.4b"}
+MEDOID_ONLY_FC = {"wikitext_pythia1.4b", "wikitext_pythia2.8b", "wikitext_pythia6.9b"}
 # fixed categorical order (validated default palette)
 HUE = {"random": "#eda100", "magnitude": "#1baf7a", "OSSCAR": "#eb6834",
        "MASH delta_f": "#2a78d6", "MASH cylinder": "#e87ba4", "MASH delete": "#008300",
@@ -170,7 +172,8 @@ def dictionary(m):
 
 
 TIMING_MODELS = ["wikitext_opt350m", "imagenet_vit_b16", "imagenet_resnet50", "wikitext_opt1.3b",
-                 "wikitext_opt2.7b", "wikitext_opt6.7b", "wikitext_pythia1.4b"]
+                 "wikitext_opt2.7b", "wikitext_opt6.7b", "wikitext_pythia1.4b", "wikitext_pythia2.8b",
+                 "wikitext_pythia6.9b"]
 TIMING_ARMS = [("random", "random_ridge"), ("magnitude", "magnitude_mass_ridge"),
                ("MASH full-row ridge", "mash_full_medoid_empirical_delta_f"),
                ("MASH drop", "mash_drop_none_delta_f"),
