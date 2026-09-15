@@ -454,6 +454,12 @@ class MashEngine:
         if score == "exact_damage" and measure == "empirical":
             self._W = self.w @ self.w.T
         self._cost = self._all_costs()
+        # Per-step profile of the greedy loop, accumulated in step() and logged
+        # by plan(). Pythia-1.4b ran the loop at 41-85 ms/step (H100/A100) while
+        # OPT-6.7b ran at 4 ms/step at twice the width; the pieces below are
+        # what a step is made of, so the log names the slow one.
+        self.prof = {"argmin": 0.0, "pair_costs": 0.0, "cost_writes": 0.0,
+                     "row_cache": 0.0, "bookkeeping": 0.0, "stale_rows": 0, "steps": 0}
         # Row-minimum cache. Scanning the whole H x H matrix for the global
         # argmin at every step makes a pass O(H^3), which is what put the wide
         # transformer FFNs out of reach (37s at H=4096, ~77min at H=20480).
@@ -698,10 +704,12 @@ class MashEngine:
         return i, int(self._row_arg[i])
 
     def step(self) -> dict:
+        _t = time.perf_counter()
         i0, j0 = self._argmin()
         k, l = int(min(i0, j0)), int(max(i0, j0))
         cost = float(self._cost[k, l])
         self.cum_cost += cost
+        _t = self._tick("argmin", _t)
         # Lance--Williams needs the PRE-merge masses and cost rows
         lw = getattr(self, "_lw", False)
         if lw:
@@ -749,6 +757,7 @@ class MashEngine:
                 self._W[k, :] = rw
                 self._W[:, k] = rw
 
+        _t = self._tick("bookkeeping", _t)
         others = np.flatnonzero(self.active)
         others = others[others != k]
         if lw:
@@ -761,10 +770,12 @@ class MashEngine:
                    - A_o * cost) / (A_k_old + A_l_old + A_o)
         else:
             new = self._pair_costs(k, others)
+        _t = self._tick("pair_costs", _t)
         self._cost[k, :] = np.inf
         self._cost[:, k] = np.inf
         self._cost[k, others] = new
         self._cost[others, k] = new
+        _t = self._tick("cost_writes", _t)
 
         if self._row_cache:
             # `l` is gone; `k` changed wholesale, so rescan its row once.
@@ -789,6 +800,9 @@ class MashEngine:
                 a = int(np.argmin(self._cost[i]))
                 self._row_arg[i] = a
                 self._row_min[i] = self._cost[i, a]
+            self.prof["stale_rows"] += int(stale.sum())
+        _t = self._tick("row_cache", _t)
+        self.prof["steps"] += 1
 
         if self._track_cert:
             self.cert_terms[k] = self._cert_term(k)
@@ -799,6 +813,18 @@ class MashEngine:
         return {**rec,
                 "cluster_size": len(self.members[k]),
                 "eta": nrm / self.A[k] if self.A[k] > TINY else np.nan}
+
+    def _tick(self, key: str, t0: float) -> float:
+        now = time.perf_counter()
+        self.prof[key] += now - t0
+        return now
+
+    def profile_line(self) -> str:
+        """ms per step of each piece of the greedy loop, and stale rows per step."""
+        n = max(self.prof["steps"], 1)
+        parts = [f"{k} {1000.0 * v / n:.1f}" for k, v in self.prof.items()
+                 if k not in ("stale_rows", "steps")]
+        return (", ".join(parts) + f" ms/step; stale rows/step {self.prof['stale_rows'] / n:.1f}")
 
     def dendrogram(self, max_steps: int | None = None) -> list[dict]:
         """Run the full greedy pass (or `max_steps` of it) and return the
@@ -1763,6 +1789,7 @@ class _MashBase(PruningMethod):
         logging.info(f"  layer {layer_idx}: plan phases -- prepare {t_prep:.1f}s, "
                      f"engine init {eng_init_seconds:.1f}s, greedy loop {t_loop:.1f}s "
                      f"({len(recs)} steps, {1000.0 * t_loop / max(len(recs), 1):.1f} ms/step)")
+        logging.info(f"  layer {layer_idx}: loop profile -- {eng.profile_line()}")
         return MashPlan(layer_idx=layer_idx,
                         pairs=[(r["survivor"], r["removed"]) for r in recs],
                         recs=recs, idx_map=idx_map, n_mergeable=len(idx_map),

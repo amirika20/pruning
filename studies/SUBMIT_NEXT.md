@@ -525,3 +525,19 @@ sbatch --export=ALL,SEED=0,RERUN=1,NO_PLAN_REUSE=1 --time=04:00:00 --partition=k
 ```
 Both cells are then rewritten with identical results (same plan key), so
 nothing on disk changes except timings.
+
+## 14. Loop profile probe (2026-09-15)
+
+The width-8192 probe: Pythia-1.4b's greedy loop runs at 85 ms/step on an A100
+and 41 ms/step on an H100, while OPT-6.7b ran at 4 ms/step at width 16384 on
+an H100 with the same code. Pythia's merges are balanced with no ties and no
+dead units -- the cheap case for every part of the loop -- so the step itself
+is now profiled: `plan()` logs `loop profile -- argmin / pair_costs /
+cost_writes / row_cache / bookkeeping ms/step; stale rows/step`. Two layers
+are enough:
+
+```bash
+sbatch --export=ALL,SEED=0,RERUN=1,NO_PLAN_REUSE=1 --time=00:45:00 scripts/slurm_large.sh configs/benchmark/manifest_plan_probe_pythia.txt
+```
+Send the two "loop profile" lines. (The cell is left unchanged: the 45 min
+wall kills it before it rewrites anything, and its report.json stays.)
