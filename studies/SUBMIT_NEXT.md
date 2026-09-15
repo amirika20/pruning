@@ -510,3 +510,18 @@ single task, so the two logs come from the same node type.
 sbatch --export=ALL --array=1-2 --time=24:00:00 scripts/slurm_large.sh configs/benchmark/manifest_pythia1.4b_osscar.txt
 sbatch --export=ALL,RERUN=1 scripts/slurm_medium.sh configs/benchmark/manifest_plan_timing_probe.txt   # diagnostic; read "plan phases" lines
 ```
+
+## 13. Plan-speed probe at H = 8192 (2026-09-15)
+
+Pythia-160m plans at 5-7 ms/step on an A100 (normal) and its 1.4b merges are
+balanced, while OPT-6.7b is hub-like and planned at 1 min/layer on an H100 --
+so neither the GELU path nor merge structure explains 12 min/layer at 1.4b.
+Time ONE width-8192 layer of each model on each node type and compare the
+"plan phases" lines (only the first 2-3 layers are needed; scancel after):
+
+```bash
+sbatch --export=ALL,SEED=0,RERUN=1,NO_PLAN_REUSE=1 --time=04:00:00 scripts/slurm_large.sh configs/benchmark/manifest_plan_timing_probe_8192.txt
+sbatch --export=ALL,SEED=0,RERUN=1,NO_PLAN_REUSE=1 --time=04:00:00 --partition=kempner_h100 scripts/slurm_large.sh configs/benchmark/manifest_plan_timing_probe_8192.txt
+```
+Both cells are then rewritten with identical results (same plan key), so
+nothing on disk changes except timings.

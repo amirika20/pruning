@@ -204,6 +204,8 @@ ARGS=(--grid "$GRID" --out "$RESULTS_ROOT")
 # RERUN=1 redoes cells whose report.json already exists (e.g. to add a record
 # an older run did not write, such as removals.json).
 [[ "${RERUN:-0}" == 1 ]] && ARGS+=(--rerun)
+# NO_PLAN_REUSE=1 forces a fresh planning pass (timing probes).
+[[ "${NO_PLAN_REUSE:-0}" == 1 ]] && ARGS+=(--no-plan-reuse)
 
 # PARALLEL CELLS PER GPU. A MASH cell spends its planning pass in host NumPy
 # with the GPU idle (the OPT-1.3b probe: 10 h of plan, 2.5 h of GPU work, and

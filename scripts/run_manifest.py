@@ -130,6 +130,9 @@ def main() -> None:
                          "AND any sweep_fractions the configs carry")
     ap.add_argument("--seed", type=int, default=None, help="one seed only")
     ap.add_argument("--out", default=f"{SCRATCH}/results")
+    ap.add_argument("--no-plan-reuse", action="store_true",
+                    help="forwarded to run_sweep: plan every layer even when a sibling "
+                         "dendrogram matches (timing probes)")
     ap.add_argument("--rerun", action="store_true",
                     help="run cells even when every seed already has a report.json "
                          "(default: skip them, so a resubmission only does what is missing)")
@@ -188,6 +191,8 @@ def main() -> None:
             cmd += ["--seed", str(args.seed)]
         if args.fractions:
             cmd += ["--fractions"] + [str(f) for f in args.fractions]
+        if args.no_plan_reuse:
+            cmd += ["--no-plan-reuse"]
         # A subprocess per cell: an OOM kill or a segfault then costs one cell
         # instead of the batch, and memory is reclaimed between cells.
         if subprocess.run(cmd, cwd=ROOT).returncode == 0:
