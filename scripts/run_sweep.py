@@ -246,10 +246,45 @@ def main() -> None:
                                                        seed, method, widths)
         if plan_src:
             logging.info(f"  reusing the dendrogram of {plan_src}")
+        # PER-LAYER CHECKPOINT. A plan is hours per layer at OPT-2.7b+, and a
+        # task that hits the wall used to lose all of them. Each finished layer
+        # is appended to plans_partial.json in this cell's seed dir; a restart
+        # loads the matching ones and plans only the rest. Removed on success.
+        out = root / f"seed_{seed}"
+        out.mkdir(parents=True, exist_ok=True)
+        partial_path = out / "plans_partial.json"
+        partial_layers: dict[int, dict] = {}
+        if preplanned is None and partial_path.exists():
+            try:
+                pj = json.loads(partial_path.read_text())
+                probe = build_pruning_method(method.kind, **method.params)
+                if hasattr(probe, "plan_key") and pj.get("plan_key") == probe.plan_key() \
+                        and list(pj.get("widths", [])) == list(widths):
+                    from src.pruning.methods.mash import MashPlan
+                    partial_layers = {int(l["layer"]): l for l in pj.get("layers", [])}
+                    preplanned = {li: MashPlan.from_record(l) for li, l in partial_layers.items()}
+                    logging.info(f"  resuming: {len(preplanned)} layer plan(s) from {partial_path}")
+            except Exception as exc:                          # noqa: BLE001
+                logging.warning(f"  ignoring unreadable {partial_path}: {exc}")
+
+        def checkpoint(li, plan):
+            if not hasattr(plan, "to_record"):
+                return
+            partial_layers[li] = plan.to_record()
+            key = build_pruning_method(method.kind, **method.params).plan_key()
+            tmp = partial_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"cell": config.name, "arm": method.kind, "seed": seed,
+                                       "widths": widths, "plan_key": key,
+                                       "layers": [partial_layers[i] for i in sorted(partial_layers)]}))
+            tmp.replace(partial_path)
+
         curve = sweep_widths(model, bundle, method.kind, method.params,
                              fractions=fractions, device=device,
                              eval_split=config.eval_split, preplanned=preplanned,
+                             on_layer_planned=checkpoint,
                              seed=seed, name=config.name, arm=method.kind)
+        if partial_path.exists():
+            partial_path.unlink()
         rep = sweep_report(curve)
         if plan_src:
             rep["plan_reused_from"] = str(plan_src)
@@ -259,8 +294,6 @@ def main() -> None:
                    seed=seed, units=int(sum(widths)), widths=widths,
                    fingerprints=fp, wall_seconds=time.perf_counter() - t0)
 
-        out = root / f"seed_{seed}"
-        out.mkdir(parents=True, exist_ok=True)
         curve.to_csv(out / "curve.csv", index=False)
         # Which units each width removed, so arms can be compared after the fact
         # (src.analysis.pruning_detail.overlap_table) without re-running them.

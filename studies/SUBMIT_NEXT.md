@@ -455,3 +455,38 @@ sbatch --export=ALL,PARALLEL=2 --cpus-per-task=4 --array=1-1 scripts/slurm_small
 sbatch --export=ALL,PARALLEL=3 --cpus-per-task=6 --array=1-3 scripts/slurm_medium.sh configs/benchmark/manifest_drop_medium.txt
 sbatch --array=1-10 scripts/slurm_large.sh configs/benchmark/manifest_drop_large.txt
 ```
+
+## 11. OPT-2.7b done, OPT-6.7b to redo (2026-09-14)
+
+What the big-OPT run showed and what changed:
+
+- **Planning was slow because of the certificate, not the score.** Real
+  dendrograms grow one cluster to the whole layer; the per-step certificate
+  term walks every member of the merged cluster on the host, and the members
+  touched over a pass sum to 7-25 MILLION rows of d = 2560 at 2.7b. Plans took
+  9-15 h there and could not fit 6.7b in a day. The width-driven `mash` arm no
+  longer tracks the certificate per step; it evaluates the bound for each CUT
+  (`partition_certificate`, identical to 1e-16 on the intact units).
+  `mash_certified` still tracks it (its stopping rule needs the running value).
+- **Per-layer plan checkpoints.** Each finished layer's plan is written to
+  `plans_partial.json` in the cell's seed dir; a restarted task loads them and
+  plans the rest. A wall-clock kill now costs at most one layer.
+- **Cylinder crash at 6.7b** (`munmap_chunk(): invalid pointer` in the host
+  BLAS Gram at H = 16384): the Gram is formed on the GPU now.
+- **Memory.** 6.7b needs an 80 GB card: fp16 weights are 13.4 GB, the sweep
+  holds two model copies, and OSSCAR's fp64 Hessian at H = 16384 is 2.1 GB per
+  copy -- every 6.7b cell except random/magnitude OOMed at 39.5 GB. The two
+  ridge-repaired baselines at 2.7b OOMed the same way (38.96 GB allocated).
+- **The 6.7b array ran with a 2 h wall** (every task cancelled 2h07 after
+  start): pass `--time=24:00:00` explicitly.
+
+```bash
+git pull
+# 2.7b: the two OOMed baselines, on an 80 GB card
+sbatch --gres=gpu:h100:1 --array=1-2 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_paper_big_opt2.7b_retry.txt
+# 6.7b: everything but random/magnitude (skipped as done), 80 GB card, 24 h.
+# Resubmit the same line if a task hits the wall: it resumes from plans_partial.json.
+sbatch --gres=gpu:h100:1 --array=1-13 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_paper_big_wikitext_opt6.7b.txt
+```
+The GPU feature name is cluster-specific; `sinfo -p kempner -o '%N %G'` lists
+what the 80 GB nodes are called.

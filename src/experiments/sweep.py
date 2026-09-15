@@ -133,6 +133,7 @@ def sweep_widths(
     n_calib: int | None = None,
     evaluate_fn: Callable[[PrunableModel], dict] | None = None,
     preplanned: dict[int, Any] | None = None,
+    on_layer_planned: Callable[[int, Any], None] | None = None,
     **meta: Any,
 ) -> pd.DataFrame:
     """One row per target fraction: width, accuracy, loss and timings.
@@ -174,21 +175,27 @@ def sweep_widths(
     probe = None
     if hasattr(cls, "plan") and hasattr(cls, "emit_at"):
         probe = build_pruning_method(kind, **params)
-        if preplanned is not None:
-            if set(preplanned) != set(range(model.n_prunable_layers())):
-                raise ValueError("preplanned must cover every prunable layer; "
-                                 f"got layers {sorted(preplanned)}")
-            plans = dict(preplanned)
-            logging.info(f"  [{kind}] using {len(plans)} preplanned layer(s); "
-                         "planning pass skipped")
-        else:
-            t0 = time.perf_counter()
-            for li in range(model.n_prunable_layers()):
-                ctx = PruneContext(train_inputs=train_inputs, bundle=bundle,
-                                   device=device)
-                plans[li] = probe.plan(model, li, ctx)
-            plan_seconds = time.perf_counter() - t0
-            logging.info(f"  [{kind}] planned {len(plans)} layer(s) in "
+        # `preplanned` may be PARTIAL: a resumed cell brings the layers a
+        # timed-out task finished (see run_sweep's plans_partial.json) and
+        # plans the rest. on_layer_planned fires after each fresh plan so the
+        # caller can checkpoint it.
+        plans = dict(preplanned or {})
+        todo = [li for li in range(model.n_prunable_layers()) if li not in plans]
+        if plans:
+            logging.info(f"  [{kind}] {len(plans)} layer(s) preplanned, "
+                         f"{len(todo)} to plan")
+        t0 = time.perf_counter()
+        for li in todo:
+            ctx = PruneContext(train_inputs=train_inputs, bundle=bundle,
+                               device=device)
+            t1 = time.perf_counter()
+            plans[li] = probe.plan(model, li, ctx)
+            logging.info(f"  [{kind}] layer {li}: planned in {time.perf_counter() - t1:.1f}s")
+            if on_layer_planned is not None:
+                on_layer_planned(li, plans[li])
+        plan_seconds = time.perf_counter() - t0
+        if todo:
+            logging.info(f"  [{kind}] planned {len(todo)} layer(s) in "
                          f"{plan_seconds:.2f}s -- reused at every width")
 
     removals: dict[float, dict[int, list[int]]] = {}

@@ -131,7 +131,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Any, Sequence
 
 import numpy as np
 import torch
@@ -344,7 +344,7 @@ class MashEngine:
                  mu: np.ndarray | None = None, Sigma: np.ndarray | None = None,
                  gauge_correct: bool = True, row_cache: bool = True, measure: str = "gaussian",
                  Z: np.ndarray | None = None, dictionary: str = "merge",
-                 Phi: torch.Tensor | None = None):
+                 Phi: torch.Tensor | None = None, track_certificate: bool = True):
         if score not in SCORES:
             raise ValueError(f"score must be one of {SCORES}, got {score!r}")
         if dictionary not in DICTIONARIES:
@@ -399,6 +399,14 @@ class MashEngine:
         self.x0 = np.zeros(units.u.shape[1]) if x0 is None else np.asarray(x0, float)
         self.R = 0.0 if radius is None else float(radius)
         self.cert_terms = np.zeros(H)
+        # PER-STEP CERTIFICATE IS OPTIONAL. _cert_term walks every member of
+        # the merged cluster on the host; on real layers one cluster grows to
+        # the whole layer, so the members touched over a pass sum to 7-25
+        # MILLION rows of d = 2560 at OPT-2.7b -- terabytes of host traffic
+        # and the reason a plan there took 9-15 h. The tolerance-driven arm
+        # needs the running value to stop; the width-driven arm does not, and
+        # gets the certificate of its cut from partition_certificate() instead.
+        self._track_cert = bool(track_certificate)
 
         self.measure = measure
         if score == "cylinder":
@@ -632,11 +640,15 @@ class MashEngine:
         H = self.n_orig
         allidx = np.arange(H)
         if self.score == "cylinder":
-            # ||p_i - p_j||^2 from the Gram, so the whole matrix is one matmul
+            # ||p_i - p_j||^2 from the Gram, so the whole matrix is one matmul --
+            # on the device: the host BLAS product died with
+            # `munmap_chunk(): invalid pointer` at H = 16384 (OPT-6.7b).
             u, off = self._code(allidx, "centroid")
             P = np.concatenate([self._radius * u, off[:, None]], axis=1)
+            Pt = torch.as_tensor(P, dtype=torch.float64, device=_gram_device())
+            G = (Pt @ Pt.T).cpu().numpy()
             sq = (P * P).sum(axis=1)
-            d2 = np.maximum(sq[:, None] + sq[None, :] - 2.0 * (P @ P.T), 0.0)
+            d2 = np.maximum(sq[:, None] + sq[None, :] - 2.0 * G, 0.0)
             den = self.A[:, None] + self.A[None, :]
             w = np.where(den > TINY, np.outer(self.A, self.A) / np.maximum(den, TINY), 0.0)
             cost = w * d2
@@ -777,10 +789,13 @@ class MashEngine:
                 self._row_arg[i] = a
                 self._row_min[i] = self._cost[i, a]
 
-        self.cert_terms[k] = self._cert_term(k)
+        if self._track_cert:
+            self.cert_terms[k] = self._cert_term(k)
         nrm = float(np.linalg.norm(self.g[k]))
-        return {"survivor": k, "removed": l, "cost": cost,
-                "cum_cost": self.cum_cost, "certificate": self.certificate(),
+        rec = {"survivor": k, "removed": l, "cost": cost, "cum_cost": self.cum_cost}
+        if self._track_cert:
+            rec["certificate"] = self.certificate()
+        return {**rec,
                 "cluster_size": len(self.members[k]),
                 "eta": nrm / self.A[k] if self.A[k] > TINY else np.nan}
 
@@ -795,6 +810,36 @@ class MashEngine:
 
     def mass_total(self) -> float:
         return float(self.A[self.active].sum())
+
+
+def partition_certificate(units: Units, clusters: list[list[int]], dictionary: str,
+                          x0: np.ndarray, R: float, gauge_correct: bool = True) -> float:
+    """sum over multi-unit clusters of sum_i a_i (R ||u_i - uhat_C|| + |gamma_i -
+    gammahat_C|), against the code each cluster emits -- the same quantity
+    MashEngine._cert_term accumulates per step, evaluated once for a partition.
+    `units` are the mergeable units the clusters index into (sub-indices)."""
+    a, u, rho = units.mass, units.u, units.rho
+    gam = u @ x0 - rho
+    total = 0.0
+    for cl in clusters:
+        if len(cl) < 2:
+            continue
+        m = np.asarray(cl, dtype=int)
+        if dictionary == "medoid":
+            ms = np.sort(m)
+            rep_ = int(ms[np.argmax(a[ms])])
+            uh, oh = u[rep_], float(gam[rep_])
+        else:
+            g = (a[m, None] * u[m]).sum(axis=0)
+            r = float((a[m] * rho[m]).sum())
+            den = float(a[m].sum()) if gauge_correct else float(np.linalg.norm(g))
+            if den > TINY:
+                uh, oh = g / den, float(g @ x0 - r) / den
+            else:
+                uh, oh = np.zeros_like(g), 0.0
+        total += float((a[m] * (R * np.linalg.norm(u[m] - uh, axis=1)
+                                 + np.abs(gam[m] - oh))).sum())
+    return total
 
 
 def partition_at(H: int, pairs: list[tuple[int, int]], k: int) -> list[list[int]]:
@@ -1273,6 +1318,16 @@ class MashPlan:
     # removed set (every cluster member but its heaviest) can be reconstructed
     # from the serialized dendrogram alone. Not used by the cut itself.
     mass: np.ndarray | None = None
+    # The input box the plan was scored in (centre and radius), so the
+    # certificate of any cut can be evaluated later without re-collecting Z.
+    x0: np.ndarray | None = None
+    radius: float | None = None
+    # The INTACT mergeable units the pass scored (in memory only; not serialised),
+    # so the certificate of a cut is evaluated in the same coordinates the
+    # tracked per-step value used. A plan rebuilt from dendrogram.json has none,
+    # and its cut certificate is then available only where the current layer
+    # still has the plan-time input dimension (the first prunable layer).
+    units: Any = None
 
     @property
     def max_merges(self) -> int:
@@ -1303,9 +1358,12 @@ class MashPlan:
                 row["certificate"] = float(st["certificate"])
             recs.append(row)
         mass = rec.get("mass")
+        x0 = rec.get("x0")
         return cls(layer_idx=int(rec["layer"]), pairs=pairs, recs=recs,
                    idx_map=np.asarray(idx, dtype=int), n_mergeable=int(rec["n_mergeable"]),
-                   mass=None if mass is None else np.asarray(mass, dtype=float))
+                   mass=None if mass is None else np.asarray(mass, dtype=float),
+                   x0=None if x0 is None else np.asarray(x0, dtype=float),
+                   radius=rec.get("radius"))
 
     def to_record(self) -> dict:
         """The dendrogram as plain JSON, in the LAYER's own unit indices.
@@ -1328,6 +1386,9 @@ class MashPlan:
                "mergeable": idx, "steps": steps}
         if self.mass is not None:
             out["mass"] = [float(a) for a in self.mass]
+        if self.x0 is not None:
+            out["x0"] = [float(v) for v in self.x0]
+            out["radius"] = float(self.radius or 0.0)
         return out
 
 
@@ -1337,6 +1398,11 @@ class _MashBase(PruningMethod):
     score = "delta_f"
     dictionary = None          # None = auto: merge where it is safe, else medoid
     repair = None              # None = auto: kernel on Linear, empirical on conv
+    # Whether the greedy pass accumulates the certificate at every step. The
+    # width-driven arm reads the certificate of its CUT instead (see
+    # partition_certificate); the tolerance-driven arm needs the running value
+    # and sets this True.
+    track_certificate = False
 
     def __init__(self, score: str | None = None, dictionary: str | None = None,
                  repair: str | None = None, n_calib: int = 128,
@@ -1679,12 +1745,15 @@ class _MashBase(PruningMethod):
         eng = MashEngine(sub, score=self.score, x0=x0, radius=rad, mu=mu,
                          Sigma=Sigma, gauge_correct=self.gauge_correct,
                          measure=measure, Z=Z, Phi=Phi,
-                         dictionary="medoid" if self.dictionary == "drop" else self.dictionary)
+                         dictionary="medoid" if self.dictionary == "drop" else self.dictionary,
+                         track_certificate=self.track_certificate)
         recs = eng.dendrogram()
         return MashPlan(layer_idx=layer_idx,
                         pairs=[(r["survivor"], r["removed"]) for r in recs],
                         recs=recs, idx_map=idx_map, n_mergeable=len(idx_map),
-                        mass=np.asarray(sub.mass, dtype=float).copy())
+                        mass=np.asarray(sub.mass, dtype=float).copy(),
+                        x0=np.asarray(x0, dtype=float).copy(), radius=float(rad),
+                        units=sub)
 
     def emit_at(self, model: PrunableModel, layer_idx: int, plan: MashPlan,
                 n_merges: int, ctx: PruneContext) -> PruneDecision:
@@ -1727,10 +1796,20 @@ class _MashBase(PruningMethod):
             return PruneDecision(remove=sorted(gone))
         clusters = partition_at(plan.n_mergeable, plan.pairs, k)
         recs = plan.recs[:k]
+        cert = recs[-1].get("certificate") if recs else None
+        if cert is None and plan.x0 is not None and self.dictionary != "drop":
+            # The pass did not track it: evaluate the bound for THIS cut on the
+            # intact units the pass scored (same coordinates as the tracked
+            # value). Deeper layers' current inputs have shrunk, so `sub` is
+            # usable only while its dimension still matches the plan-time box.
+            ref = plan.units
+            if ref is None and sub.u.shape[1] == len(plan.x0):
+                ref = sub
+            if ref is not None:
+                cert = partition_certificate(ref, clusters, self.dictionary, plan.x0,
+                                             plan.radius or 0.0, self.gauge_correct)
         return self._emit(model, layer_idx, units, ok, idx_map, frozen,
-                          clusters, Z, mu, Sigma, recs=recs,
-                          cert=recs[-1].get("certificate") if recs else None,
-                          act=act)
+                          clusters, Z, mu, Sigma, recs=recs, cert=cert, act=act)
 
 
 @register_pruning_method("mash")
@@ -1765,6 +1844,8 @@ class MASH(_MashBase):
 
 @register_pruning_method("mash_certified")
 class MASHCertified(_MashBase):
+    track_certificate = True   # the stopping rule reads the running certificate
+
     """Tolerance-driven MASH: the domain-only tier.
 
     Merges while the certificate stays inside `tol` times the layer's scale,

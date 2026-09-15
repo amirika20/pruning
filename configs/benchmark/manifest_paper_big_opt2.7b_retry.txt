@@ -1,0 +1,2 @@
+configs/benchmark/generated/wikitext_opt2.7b/random_ridge.yaml
+configs/benchmark/generated/wikitext_opt2.7b/magnitude_mass_ridge.yaml
