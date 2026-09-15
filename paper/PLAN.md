@@ -10,8 +10,8 @@ Decisions (2026-09-10): OSSCAR is the major baseline and keeps ITS OWN repair
 throughout (no OSSCAR-under-our-repair arm). For every other arm "repaired"
 means the empirical least-squares repair at ridge 1e-2 (OSSCAR's damping
 strength; the 1e-8 guard is an appendix ablation). OPT-2.7b/6.7b run a
-reduced set (`paper_big`): no Gaussian ablation, no medoid variants, no
-mash_certified. Three seeds everywhere; OPT-2.7b/6.7b
+reduced set (`paper_big`): no Gaussian ablation, no cylinder arms (the
+certificate tier stays on the smaller models), no mash_certified. Three seeds everywhere; OPT-2.7b/6.7b
 start at one seed and get three if the budget allows. The delta_f score's
 measure is SAMPLED by default; Gaussian moments are the `mash_gaussian_*`
 ablation and exist only on fully-connected layers.

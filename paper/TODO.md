@@ -8,18 +8,18 @@ Legend: `3/3` seeds done / wanted, `--` unrunnable by construction, `ARM?` arm n
 
 | arm | mnist_lenet | c10_resnet20 | c10_resnet56 | in_resnet18 | in_resnet50 | in_mobilenetv2 | in_vit_b16 | opt125m | opt350m | opt1.3b | opt2.7b | opt6.7b |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| mash_medoid_none_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
-| osscar_norepair | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
-| magnitude_mass | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
+| mash_medoid_none_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | 0/1 |
+| osscar_norepair | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | 0/1 |
+| magnitude_mass | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | **1/1** |
 
 ## C1b same repair
 
 | arm | mnist_lenet | c10_resnet20 | c10_resnet56 | in_resnet18 | in_resnet50 | in_mobilenetv2 | in_vit_b16 | opt125m | opt350m | opt1.3b | opt2.7b | opt6.7b |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| mash_full_medoid_empirical_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
+| mash_full_medoid_empirical_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | 0/1 |
 | mash_ridge_medoid_empirical_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | -- | -- |
-| mash_ridge_merge_empirical_delta_f | **3/3** | -- | -- | -- | -- | -- | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
-| osscar | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
+| mash_ridge_merge_empirical_delta_f | **3/3** | -- | -- | -- | -- | -- | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | 0/1 |
+| osscar | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | 0/1 |
 | random_ridge | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
 | magnitude_mass_ridge | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
 
@@ -27,21 +27,21 @@ Legend: `3/3` seeds done / wanted, `--` unrunnable by construction, `ARM?` arm n
 
 | arm | mnist_lenet | c10_resnet20 | c10_resnet56 | in_resnet18 | in_resnet50 | in_mobilenetv2 | in_vit_b16 | opt125m | opt350m | opt1.3b | opt2.7b | opt6.7b |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| random | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
-| magnitude_mass | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
-| osscar_norepair | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
-| mash_medoid_none_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
-| mash_drop_none_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
-| mash_medoid_sum_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
-| mash_merge_sum_delta_f | **3/3** | -- | -- | -- | -- | -- | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
+| random | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | **1/1** |
+| magnitude_mass | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | **1/1** |
+| osscar_norepair | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | 0/1 |
+| mash_medoid_none_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | 0/1 |
+| mash_drop_none_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | 0/1 |
+| mash_medoid_sum_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | 0/1 |
+| mash_merge_sum_delta_f | **3/3** | -- | -- | -- | -- | -- | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | 0/1 |
 
 ## C3 overall + cost
 
 | arm | mnist_lenet | c10_resnet20 | c10_resnet56 | in_resnet18 | in_resnet50 | in_mobilenetv2 | in_vit_b16 | opt125m | opt350m | opt1.3b | opt2.7b | opt6.7b |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| osscar | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
-| mash_full_medoid_empirical_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
-| mash_ridge_merge_empirical_delta_f | **3/3** | -- | -- | -- | -- | -- | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
+| osscar | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | 0/1 |
+| mash_full_medoid_empirical_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | 0/1 |
+| mash_ridge_merge_empirical_delta_f | **3/3** | -- | -- | -- | -- | -- | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | 0/1 |
 | mash_ridge_medoid_empirical_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | -- | -- |
 | random_ridge | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
 | magnitude_mass_ridge | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
@@ -50,11 +50,11 @@ Legend: `3/3` seeds done / wanted, `--` unrunnable by construction, `ARM?` arm n
 
 | arm | in_vit_b16 | opt125m | opt350m | opt1.3b | opt2.7b | opt6.7b |
 |---|---|---|---|---|---|---|
-| mash_merge_sum_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
+| mash_merge_sum_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | 0/1 |
 | mash_gaussian_merge_sum_delta_f | **3/3** | **3/3** | **3/3** | 1/3 | -- | -- |
-| mash_ridge_merge_empirical_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
+| mash_ridge_merge_empirical_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | 0/1 |
 | mash_ridge_gaussian_merge_empirical_delta_f | **3/3** | **3/3** | **3/3** | 1/3 | -- | -- |
-| mash_medoid_none_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
+| mash_medoid_none_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | 0/1 |
 | mash_gaussian_medoid_none_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | -- | -- |
 
 ## C5c certificate (benchmark cells)
@@ -62,7 +62,7 @@ Legend: `3/3` seeds done / wanted, `--` unrunnable by construction, `ARM?` arm n
 | arm | mnist_lenet | c10_resnet20 | c10_resnet56 | in_resnet18 | in_resnet50 | in_mobilenetv2 | in_vit_b16 | opt125m | opt350m | opt1.3b | opt2.7b | opt6.7b |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | mash_certified | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | -- | -- |
-| mash_merge_sum_cylinder | **3/3** | -- | -- | -- | -- | -- | **3/3** | **3/3** | **3/3** | **3/3** | 0/1 | 0/1 |
+| mash_merge_sum_cylinder | **3/3** | -- | -- | -- | -- | -- | **3/3** | **3/3** | **3/3** | **3/3** | -- | -- |
 | mash_medoid_sum_cylinder | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | -- | -- |
 | mash_ridge_merge_empirical_cylinder | **3/3** | -- | -- | -- | -- | -- | **3/3** | **3/3** | **3/3** | **3/3** | -- | -- |
 | mash_ridge_medoid_empirical_cylinder | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | -- | -- |
@@ -80,10 +80,10 @@ Legend: `3/3` seeds done / wanted, `--` unrunnable by construction, `ARM?` arm n
 - **wikitext_opt125m**: complete
 - **wikitext_opt350m**: complete
 - **wikitext_opt1.3b** (2 cells, 4 seed-runs): mash_gaussian_merge_sum_delta_f (+2), mash_ridge_gaussian_merge_empirical_delta_f (+2)
-- **wikitext_opt2.7b** (13 cells, 13 seed-runs): magnitude_mass (+1), magnitude_mass_ridge (+1), mash_drop_none_delta_f (+1), mash_full_medoid_empirical_delta_f (+1), mash_medoid_none_delta_f (+1), mash_medoid_sum_delta_f (+1), mash_merge_sum_cylinder (+1), mash_merge_sum_delta_f (+1), mash_ridge_merge_empirical_delta_f (+1), osscar (+1), osscar_norepair (+1), random (+1), random_ridge (+1)
-- **wikitext_opt6.7b** (13 cells, 13 seed-runs): magnitude_mass (+1), magnitude_mass_ridge (+1), mash_drop_none_delta_f (+1), mash_full_medoid_empirical_delta_f (+1), mash_medoid_none_delta_f (+1), mash_medoid_sum_delta_f (+1), mash_merge_sum_cylinder (+1), mash_merge_sum_delta_f (+1), mash_ridge_merge_empirical_delta_f (+1), osscar (+1), osscar_norepair (+1), random (+1), random_ridge (+1)
+- **wikitext_opt2.7b** (2 cells, 2 seed-runs): magnitude_mass_ridge (+1), random_ridge (+1)
+- **wikitext_opt6.7b** (10 cells, 10 seed-runs): magnitude_mass_ridge (+1), mash_drop_none_delta_f (+1), mash_full_medoid_empirical_delta_f (+1), mash_medoid_none_delta_f (+1), mash_medoid_sum_delta_f (+1), mash_merge_sum_delta_f (+1), mash_ridge_merge_empirical_delta_f (+1), osscar (+1), osscar_norepair (+1), random_ridge (+1)
 
-**30 seed-runs missing in total.**
+**16 seed-runs missing in total.**
 
 ## Analysis figures (not benchmark cells)
 

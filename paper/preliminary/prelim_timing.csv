@@ -43,3 +43,11 @@ wikitext_opt1.3b,MASH merge+ridge,mash_ridge_merge_empirical_delta_f,3,13131.151
 wikitext_opt1.3b,MASH medoid+ridge,mash_ridge_medoid_empirical_delta_f,3,22635.608213207994,4503.171141003804,717.8333568111993,27856.612711022997,False
 wikitext_opt1.3b,MASH Gaussian merge+ridge,mash_ridge_gaussian_merge_empirical_delta_f,1,0.0,3962.1948960979935,524.8326952620409,4487.027591360034,True
 wikitext_opt1.3b,MASH cylinder merge+sum,mash_merge_sum_cylinder,3,9325.721746923946,341.566128862245,655.4976830517408,10322.785558837932,False
+wikitext_opt2.7b,MASH full-row ridge,mash_full_medoid_empirical_delta_f,1,53915.21587165492,9962.054770937655,975.3908583645243,64852.661500957096,False
+wikitext_opt2.7b,MASH drop,mash_drop_none_delta_f,1,52355.71217993996,233.39531989535317,983.5392326086294,53572.64673244394,False
+wikitext_opt2.7b,OSSCAR,osscar,1,0.0,9605.077987149823,954.7598034420516,10559.837790591875,False
+wikitext_opt2.7b,MASH delete,mash_medoid_none_delta_f,1,52908.94483569008,637.2552100419998,1006.5468533479143,54552.74689908,False
+wikitext_opt2.7b,MASH merge+sum,mash_merge_sum_delta_f,1,33412.40179222799,627.524173481157,952.5735052698292,34992.499470978975,False
+wikitext_opt2.7b,MASH medoid+sum,mash_medoid_sum_delta_f,1,55689.42002720293,586.2432345862035,962.3420488180127,57238.00531060714,False
+wikitext_opt2.7b,MASH merge+ridge,mash_ridge_merge_empirical_delta_f,1,31319.786022256827,9596.64339423203,950.8840651852079,41867.313481674064,False
+wikitext_opt2.7b,MASH cylinder merge+sum,mash_merge_sum_cylinder,1,25891.885843798053,626.9262123848312,952.0152004470583,27470.827256629942,False

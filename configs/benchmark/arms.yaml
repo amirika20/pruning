@@ -172,7 +172,6 @@ paper_big:
   - mash_merge_sum_delta_f
   - mash_ridge_merge_empirical_delta_f
   - mash_full_medoid_empirical_delta_f
-  - mash_merge_sum_cylinder
 
 # NON-ReLU LMs (Pythia, GELU; decided 2026-09-13): the arms whose selection
 # and repair read only the units' post-activation RESPONSES and outgoing

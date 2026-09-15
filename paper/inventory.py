@@ -64,7 +64,7 @@ PAPER_BIG = {"random", "random_ridge", "magnitude_mass", "magnitude_mass_ridge",
              "osscar_norepair", "mash_medoid_none_delta_f", "mash_drop_none_delta_f",
              "mash_medoid_sum_delta_f",
              "mash_merge_sum_delta_f", "mash_ridge_merge_empirical_delta_f",
-             "mash_full_medoid_empirical_delta_f", "mash_merge_sum_cylinder"}
+             "mash_full_medoid_empirical_delta_f"}   # no cylinder arms at 2.7b/6.7b (decided 2026-09-14)
 
 
 def applicable(arm: str, model: str) -> str | None:
