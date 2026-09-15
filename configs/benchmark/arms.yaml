@@ -176,15 +176,19 @@ paper_big:
 # NON-ReLU LMs (Pythia, GELU; decided 2026-09-13): the arms whose selection
 # and repair read only the units' post-activation RESPONSES and outgoing
 # columns -- the "functional" subset of MASH (see the mash.py docstring). No
-# Gaussian measure, no merge dictionary, no cylinder/certificate, no OSSCAR
-# (its Hessian target assumes the rectified FFN); the ReLU-only arms raise
-# NotImplementedError on these entries and are simply not listed here.
+# Gaussian measure, no merge dictionary, no cylinder/certificate; the ReLU-only
+# arms raise NotImplementedError on these entries and are simply not listed
+# here. OSSCAR IS listed (added 2026-09-15): its Hessian is the consumer's
+# actual inputs, hooked on the consumer, so it never assumed ReLU -- verified
+# on a GELU layer against deletion and random.
 # `--tier pythia` / `arms_tier: pythia`.
 pythia:
   - random
   - random_ridge
   - magnitude_mass
   - magnitude_mass_ridge
+  - osscar
+  - osscar_norepair
   - mash_medoid_none_delta_f
   - mash_drop_none_delta_f
   - mash_medoid_sum_delta_f

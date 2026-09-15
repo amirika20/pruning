@@ -2,6 +2,8 @@ configs/benchmark/generated/wikitext_pythia1.4b/random.yaml
 configs/benchmark/generated/wikitext_pythia1.4b/random_ridge.yaml
 configs/benchmark/generated/wikitext_pythia1.4b/magnitude_mass.yaml
 configs/benchmark/generated/wikitext_pythia1.4b/magnitude_mass_ridge.yaml
+configs/benchmark/generated/wikitext_pythia1.4b/osscar.yaml
+configs/benchmark/generated/wikitext_pythia1.4b/osscar_norepair.yaml
 configs/benchmark/generated/wikitext_pythia1.4b/mash_medoid_sum_delta_f.yaml
 configs/benchmark/generated/wikitext_pythia1.4b/mash_medoid_empirical_delta_f.yaml
 configs/benchmark/generated/wikitext_pythia1.4b/mash_medoid_none_delta_f.yaml

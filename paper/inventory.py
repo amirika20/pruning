@@ -28,13 +28,13 @@ BENCH = ROOT / "configs" / "benchmark"
 MODELS = ["mnist_lenet", "cifar10_resnet20", "cifar10_resnet56",
           "imagenet_resnet18", "imagenet_resnet50", "imagenet_mobilenetv2", "imagenet_vit_b16",
           "wikitext_opt125m", "wikitext_opt350m", "wikitext_opt1.3b", "wikitext_opt2.7b",
-          "wikitext_opt6.7b"]
+          "wikitext_opt6.7b", "wikitext_pythia1.4b"]
 FC = {"imagenet_vit_b16", "wikitext_opt125m", "wikitext_opt350m", "wikitext_opt1.3b",
       "wikitext_opt2.7b", "wikitext_opt6.7b"}
 BN = {"cifar10_resnet20", "cifar10_resnet56", "imagenet_resnet18", "imagenet_resnet50",
       "imagenet_mobilenetv2"}
 WANT_SEEDS = {m: 3 for m in MODELS}
-WANT_SEEDS.update({"wikitext_opt2.7b": 1, "wikitext_opt6.7b": 1})
+WANT_SEEDS.update({"wikitext_opt2.7b": 1, "wikitext_opt6.7b": 1, "wikitext_pythia1.4b": 2})
 
 CLAIMS = {
     "C1a overlap (removal sets)": ["mash_medoid_none_delta_f", "osscar_norepair", "magnitude_mass"],
@@ -67,8 +67,19 @@ PAPER_BIG = {"random", "random_ridge", "magnitude_mass", "magnitude_mass_ridge",
              "mash_full_medoid_empirical_delta_f"}   # no cylinder arms at 2.7b/6.7b (decided 2026-09-14)
 
 
+# Pythia (GELU): the functional path -- delta_f from sample Grams, medoid
+# dictionary, empirical/ridge repair -- plus the activation-agnostic baselines.
+PYTHIA = {"wikitext_pythia1.4b"}
+PAPER_PYTHIA = {"random", "random_ridge", "magnitude_mass", "magnitude_mass_ridge", "osscar",
+                "osscar_norepair", "mash_medoid_none_delta_f", "mash_drop_none_delta_f",
+                "mash_medoid_sum_delta_f", "mash_ridge_medoid_empirical_delta_f",
+                "mash_full_medoid_empirical_delta_f"}
+
+
 def applicable(arm: str, model: str) -> str | None:
     """None if runnable and planned; else why not."""
+    if model in PYTHIA and arm not in PAPER_PYTHIA:
+        return "not in the Pythia (GELU) set"
     if model in BIG and arm not in PAPER_BIG:
         return "not in the reduced big-OPT set"
     if "merge" in arm and model in BN:

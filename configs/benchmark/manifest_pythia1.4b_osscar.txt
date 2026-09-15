@@ -1,0 +1,2 @@
+configs/benchmark/generated/wikitext_pythia1.4b/osscar.yaml
+configs/benchmark/generated/wikitext_pythia1.4b/osscar_norepair.yaml

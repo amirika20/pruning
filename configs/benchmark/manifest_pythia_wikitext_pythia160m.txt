@@ -1,0 +1,12 @@
+configs/benchmark/generated/wikitext_pythia160m/random.yaml
+configs/benchmark/generated/wikitext_pythia160m/random_ridge.yaml
+configs/benchmark/generated/wikitext_pythia160m/magnitude_mass.yaml
+configs/benchmark/generated/wikitext_pythia160m/magnitude_mass_ridge.yaml
+configs/benchmark/generated/wikitext_pythia160m/osscar.yaml
+configs/benchmark/generated/wikitext_pythia160m/osscar_norepair.yaml
+configs/benchmark/generated/wikitext_pythia160m/mash_medoid_sum_delta_f.yaml
+configs/benchmark/generated/wikitext_pythia160m/mash_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/wikitext_pythia160m/mash_medoid_none_delta_f.yaml
+configs/benchmark/generated/wikitext_pythia160m/mash_ridge_medoid_empirical_delta_f.yaml
+configs/benchmark/generated/wikitext_pythia160m/mash_drop_none_delta_f.yaml
+configs/benchmark/generated/wikitext_pythia160m/mash_full_medoid_empirical_delta_f.yaml

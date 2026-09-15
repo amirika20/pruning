@@ -491,19 +491,22 @@ sbatch --gres=gpu:h100:1 --array=1-13 --time=24:00:00 --mem=96G scripts/slurm_la
 The GPU feature name is cluster-specific; `sinfo -p kempner -o '%N %G'` lists
 what the 80 GB nodes are called.
 
-## 12. Pythia-1.4b seed 2 (2026-09-15)
+## 12. Pythia-1.4b: two seeds, OSSCAR added (2026-09-15)
 
-The paper set is complete through OPT-6.7b. Pythia-1.4b has 3 seeds on the
-baselines and 2 on the six MASH arms: each MASH cell planned its own copy of the
-same medoid dendrogram (4.7 h at ~12 min/layer on an A100) for seeds 0 and 1
-and the wall took seed 2 mid-plan. Their seed_2/plans_partial.json checkpoints
-are on scratch (the most advanced, mash_full, has 17 of 24 layers). Run the six
-MASH cells in ONE sequential task with SEED=2, mash_full first: it resumes from
-its checkpoint, finishes the plan, and every later cell reuses its dendrogram.
-`plan()` now logs per-layer phase times (prepare / engine init / greedy loop,
-ms per step) -- read those lines to see why a Pythia layer costs 12 min when an
-OPT-6.7b layer of twice the width costs 1 min on an H100.
+Pythia runs TWO seeds (suite seed_overrides). The six MASH arms and the four
+baselines already have them; the seed-2 checkpoints on scratch are unused.
+OSSCAR was left out of the `pythia` tier on the belief that its Hessian
+assumed ReLU; it does not -- it hooks the consumer's actual inputs -- and it
+runs on a GELU layer (checked against deletion and random). Added.
+
+Planning speed: a Pythia-1.4b layer planned in ~12 min on an A100 while an
+OPT-6.7b layer of twice the width took ~1 min on an H100, with the same code
+and a score that does not depend on the activation. `plan()` now logs the
+phase split per layer (prepare / engine init / greedy loop, ms per step). The
+probe manifest runs one cheap MASH cell each on Pythia-160m and OPT-125m in a
+single task, so the two logs come from the same node type.
 
 ```bash
-sbatch --export=ALL,SEED=2 --time=24:00:00 scripts/slurm_large.sh configs/benchmark/manifest_pythia1.4b_mash_seed2.txt
+sbatch --export=ALL --array=1-2 --time=24:00:00 scripts/slurm_large.sh configs/benchmark/manifest_pythia1.4b_osscar.txt
+sbatch --export=ALL,RERUN=1 scripts/slurm_medium.sh configs/benchmark/manifest_plan_timing_probe.txt   # diagnostic; read "plan phases" lines
 ```

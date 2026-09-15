@@ -394,6 +394,12 @@ defaults:
 # AND the arm is deterministic. The big LMs get one to keep the queue honest.
 # resnet50 and vit_b16 moved to three seeds on 2026-09-10 (paper tier).
 seed_overrides:
+  # Pythia: two seeds (decided 2026-09-15)
+  wikitext_pythia160m: [0, 1]
+  wikitext_pythia410m: [0, 1]
+  wikitext_pythia1.4b: [0, 1]
+  wikitext_pythia2.8b: [0, 1]
+  wikitext_pythia6.9b: [0, 1]
   wikitext_opt2.7b: [0]
   wikitext_opt6.7b: [0]
   wikitext_opt13b: [0]
