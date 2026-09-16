@@ -373,8 +373,7 @@ entries:
   # A hidden channel has two producer rows and one consumer column; its response
   # is still one scalar the consumer reads linearly, so the same functional set
   # as Pythia applies (src/models/gated_lm.py). Each repo has its own tokenizer.
-  # Widths: Qwen2.5-7B 28x18944 (vocab 151936), Llama-3.1-8B 32x14336 (vocab
-  # 128256). bf16 is the training dtype (7-8B ~15 GB resident). Llama weights
+  # Widths: Qwen2.5-7B 28x18944 (vocab 151936). bf16 is the training dtype (7-8B ~15 GB resident). Llama weights
   # are license-gated on the Hub; Qwen downloads without a token.
   - name: wikitext_qwen2.5_7b
     arms_tier: pythia
@@ -386,15 +385,6 @@ entries:
                                     n_train: 128, n_val: 32, n_test: null}}
     model: {kind: gated_lm, params: {repo: qwen2.5-7b, pretrained: true, dtype: bfloat16}}
 
-  - name: wikitext_llama3.1_8b
-    arms_tier: pythia
-    sweep_fractions: [0.02, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50, 0.65, 0.80]
-    family: fc
-    resources: large
-    analyze_geometry: false
-    data: {kind: wikitext, params: {tokenizer: meta-llama/Llama-3.1-8B, seq_len: 512,
-                                    n_train: 128, n_val: 32, n_test: null}}
-    model: {kind: gated_lm, params: {repo: llama3.1-8b, pretrained: true, dtype: bfloat16}}
 
 # ── defaults applied to every generated config ──────────────────────────────
 defaults:
@@ -429,7 +419,6 @@ seed_overrides:
   wikitext_pythia6.9b: [0, 1]
   # gated LMs: two seeds, like Pythia (decided 2026-09-16)
   wikitext_qwen2.5_7b: [0, 1]
-  wikitext_llama3.1_8b: [0, 1]
   wikitext_opt2.7b: [0]
   wikitext_opt6.7b: [0]
   wikitext_opt13b: [0]

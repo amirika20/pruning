@@ -91,6 +91,15 @@ def tensor_digest(*tensors: torch.Tensor | np.ndarray | None) -> str:
         if t is None:
             h.update(b"<none>")
             continue
+        if isinstance(t, torch.Tensor) and t.dtype == torch.bfloat16:
+            # NumPy has no bfloat16. Hash the raw 16-bit pattern (exact, no
+            # rounding) and fold the torch dtype name in, as for every other
+            # dtype below. Qwen/Llama load in bf16; Pythia's fp16 never hit this.
+            a = t.detach().cpu().contiguous().view(torch.int16).numpy()
+            h.update(b"torch.bfloat16")
+            h.update(str(tuple(t.shape)).encode())
+            h.update(np.ascontiguousarray(a).tobytes())
+            continue
         a = t.detach().cpu().numpy() if isinstance(t, torch.Tensor) else np.asarray(t)
         h.update(str(a.dtype).encode())
         h.update(str(a.shape).encode())

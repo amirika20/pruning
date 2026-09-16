@@ -595,7 +595,7 @@ sbatch --partition=kempner_h100 --gres=gpu:1 --mem=48G --time=00:30:00 --cpus-pe
   --wrap 'module load python; source activate <env>; python scripts/warmup_gated_lm.py --test qwen2.5-0.5b'
 
 # then, per model, stage 1 (plans once per seed) -> stage 2 (reuses the dendrogram)
-for m in qwen2.5_7b llama3.1_8b; do for s in 0 1; do
+for m in qwen2.5_7b; do for s in 0 1; do        # llama3.1_8b dropped 2026-09-16
   j=$(sbatch --parsable --partition=kempner_h100 --export=ALL,SEED=$s --array=1-7 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_pythia_${m}_stage1.txt)
   sbatch --dependency=afterany:$j --partition=kempner_h100 --export=ALL,SEED=$s --array=1-5 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_pythia_${m}_stage2.txt
 done; done
@@ -603,3 +603,10 @@ done; done
 Add `--account=<pehlevan share>` to every sbatch if the partition's default is
 not it. Qwen's vocab is 151936, so the logits of a 512-token chunk are 4x
 OPT's; the chunked forward (8 rows) keeps that under 3 GB.
+
+First Qwen submission (46766627-30) failed at model load: the run fingerprint
+hashed the state dict through NumPy, which has no bfloat16 (Pythia-6.9b was
+fp16 and never hit it). Fixed in src/reproducibility.py (bf16 hashed through
+its raw 16-bit view; every other dtype's digest unchanged). Llama is dropped
+(user, 2026-09-16); the adapter keeps its short names. Resubmit the same
+loop after pulling.
