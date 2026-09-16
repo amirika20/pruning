@@ -386,6 +386,12 @@ class MashEngine:
         self._resp_kind = ("centroid" if score == "exact_damage" and gauge_correct
                            else "realized")
         a = units.mass
+        # Units.mass is a PROPERTY: every read recomputes alpha_i ||c_i|| over
+        # the whole [H, m] outgoing matrix (12 ms at H=4096, m=2560). The
+        # functional path's step() reads it twice through _medoid, which was
+        # 90 of the 92 ms/step at Pythia-2.8b -- the "bookkeeping" the loop
+        # profile named. The original masses never change; read them once.
+        self._mass0 = np.asarray(a, dtype=np.float64).copy()
         H = len(a)
         self.n_orig = H
         self.members: list[list[int]] = [[i] for i in range(H)]
@@ -532,7 +538,7 @@ class MashEngine:
         there (partition_at hands back ascending members) -- certifying a
         different unit than the one emitted is the whole failure mode here."""
         mem = np.sort(np.asarray(self.members[k], dtype=int))
-        return int(mem[np.argmax(self.orig.mass[mem])])
+        return int(mem[np.argmax(self._mass0[mem])])
 
     def emitted_code(self, idx: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """The code of the affine function each cluster actually realizes: the
@@ -686,7 +692,7 @@ class MashEngine:
         uh, oh = self.emitted_code(np.array([k]))
         du = self.orig.u[mem] - uh[0]
         gam = self.orig.u[mem] @ self.x0 - self.orig.rho[mem]
-        return float((self.orig.mass[mem]
+        return float((self._mass0[mem]
                       * (self.R * np.linalg.norm(du, axis=1)
                          + np.abs(gam - oh[0]))).sum())
 
