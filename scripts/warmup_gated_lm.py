@@ -126,7 +126,10 @@ def _check_responses(model, x, device) -> float:
     units, ok = extract_units(model, li, Z=Z)
     Phi = _unit_responses(Z, units.u, -units.rho, units.alpha, model.activation(li),
                           idx=np.arange(len(ok))).cpu().numpy().T * units.alpha
-    return float(np.abs(Phi - fed).max())
+    # RELATIVE gap: the network's tensor is the bf16/fp16 product of two half-
+    # precision matmuls, MASH's is float64 from the captured input, and Qwen's
+    # responses reach tens -- an absolute 5e-2 there is half-precision rounding.
+    return float(np.abs(Phi - fed).max() / max(np.abs(fed).max(), 1e-12))
 
 
 def pipeline_test(model, bundle, device, fraction: float, label: str,
@@ -150,7 +153,11 @@ def pipeline_test(model, bundle, device, fraction: float, label: str,
         fails += 0 if cond else 1
 
     gap = _check_responses(model, x[:2], device)
-    check(gap < 1e-3, f"gated responses match what down_proj receives (max gap {gap:.1e})")
+    half = model.prunable_layer(0).weight.dtype in (torch.float16, torch.bfloat16)
+    tol = 2e-2 if half else 1e-4      # bf16 keeps ~3 digits; fp32 ~7
+    check(gap < tol, f"gated responses match what down_proj receives "
+                     f"(max relative gap {gap:.1e}, tol {tol:.0e} for "
+                     f"{model.prunable_layer(0).weight.dtype})")
     check(isinstance(model.activation(0), GatedActivation),
           f"activation is gated ({model.activation(0)!r})")
 
