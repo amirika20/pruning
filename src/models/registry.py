@@ -18,6 +18,7 @@ import abc
 from dataclasses import dataclass
 from typing import Callable
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -137,6 +138,70 @@ class PrunableModel(nn.Module, abc.ABC):
 def is_relu(act: Callable[[torch.Tensor], torch.Tensor]) -> bool:
     """Whether `act` is the ReLU the closed-form machinery assumes."""
     return act is torch.relu or act is F.relu or isinstance(act, nn.ReLU)
+
+
+class GatedActivation:
+    """The nonlinearity of a GATED MLP block (Llama, Qwen, Mistral, Gemma):
+
+        down( act(gate x) * (up x) )
+
+    A hidden channel i responds  phi_i(x) = act(g_i^T x + bg_i) * (u_i^T x + bu_i),
+    and the consumer reads that scalar linearly, exactly as it reads a plain
+    unit's act(w^T x + b). So a channel IS a unit of the functional path -- with
+    one difference: its response is not a function of ONE pre-activation. It
+    is homogeneous in the up row, though, so the adapter exposes up_proj as
+    the prunable layer (its rows carry the RMS gauge, as a plain unit's rows
+    do) and hands the gate over here. The functional helpers then call
+
+        responder = act.gate(idx)          # units idx of this layer
+        phi = responder(pre, z)            # pre = z up_idx^T + bu_idx, z = layer input
+
+    which returns act_fn(z g_idx^T + bg_idx) * pre. Nothing else in the
+    pipeline changes: the RMS gauge, the medoid dictionary, the sum rule and
+    the empirical/ridge repair only ever read responses and consumer columns.
+    Calling the object directly on a pre-activation alone is refused: that
+    would silently drop the gate."""
+
+    def __init__(self, gate_weight: torch.Tensor, gate_bias: torch.Tensor | None,
+                 act_fn: Callable[[torch.Tensor], torch.Tensor]):
+        self.gate_weight = gate_weight.detach()          # [H, d]
+        self.gate_bias = None if gate_bias is None else gate_bias.detach()
+        self.act_fn = act_fn
+        self._cache: dict[tuple, tuple[torch.Tensor, torch.Tensor | None]] = {}
+
+    def __repr__(self) -> str:
+        name = getattr(self.act_fn, "__name__", type(self.act_fn).__name__)
+        return f"GatedActivation({name} * up, H={self.gate_weight.shape[0]})"
+
+    def _on(self, device, dtype):
+        key = (str(device), dtype)
+        if key not in self._cache:
+            self._cache[key] = (self.gate_weight.to(device=device, dtype=dtype),
+                                None if self.gate_bias is None
+                                else self.gate_bias.to(device=device, dtype=dtype))
+        return self._cache[key]
+
+    def gate(self, idx=None) -> Callable[[torch.Tensor, torch.Tensor], torch.Tensor]:
+        """A responder for units `idx` (None: all, in order): (pre, z) -> response."""
+        idx_t = None if idx is None else torch.as_tensor(
+            np.asarray(idx, dtype=np.int64), device=self.gate_weight.device)
+        act_fn = self.act_fn
+
+        def respond(pre: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+            G, bg = self._on(z.device, z.dtype)
+            if idx_t is not None:
+                sel = idx_t.to(z.device)
+                G, bg = G[sel], (None if bg is None else bg[sel])
+            gz = z @ G.T
+            if bg is not None:
+                gz = gz + bg
+            return act_fn(gz) * pre
+
+        return respond
+
+    def __call__(self, pre: torch.Tensor) -> torch.Tensor:
+        raise TypeError("a GatedActivation needs the layer input as well as the "
+                        "pre-activation: use act.gate(idx)(pre, z)")
 
 
 def register_model(name: str) -> Callable[[Callable[..., nn.Module]], Callable[..., nn.Module]]:

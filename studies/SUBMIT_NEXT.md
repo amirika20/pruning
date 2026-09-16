@@ -562,3 +562,44 @@ done
 6.9b: at the current loop rate a width-16384 plan is ~20 h per seed and may
 not fit 24 h even with checkpoints on the first submission; wait for the §14
 profile and its fix, then the same two lines with `pythia6.9b`.
+
+## 16. Gated-MLP LMs: Qwen2.5-7B and Llama-3.1-8B (2026-09-16)
+
+Pythia-6.9b is dropped (decided 2026-09-16); the "beyond ReLU" section gets a
+modern architecture instead. Llama/Qwen/Mistral MLPs are gated,
+`down(silu(gate x) * (up x))`, so a hidden channel has two producer rows and
+one consumer column. Its response is still one scalar the consumer reads
+linearly, and the functional path only ever reads responses and consumer
+columns, so the same 12-arm `pythia` tier applies unchanged
+(`src/models/gated_lm.py`; the gate is declared through
+`GatedActivation` in `src/models/registry.py`, and the response helpers in
+mash.py form `act(gate z) * pre` through one seam, `_responder`). Verified on
+a random tiny Llama: MASH's responses equal what down_proj receives to 4e-8,
+ReLU-only arms refused, MASH/baselines/OSSCAR prune and forward at the new
+width, gate and up rows sliced together (`scripts/warmup_gated_lm.py
+--synthetic`). Entries `wikitext_qwen2.5_7b` (28 x 18944) and
+`wikitext_llama3.1_8b` (32 x 14336), two seeds, 10-point grid, bf16.
+
+The planning loop is fixed (§14: unit masses were recomputed twice per step;
+`c66552e`), so a width-18944 plan is minutes per layer, not hours. OSSCAR is
+now the slow arm (its greedy loop is ∝ Σ fractions · H per layer; 2.8b took
+1.4 h per seed at H=10240, expect ~3-4 h at 8B).
+
+```bash
+# LOGIN NODE. Qwen needs no token. Llama: accept the license on the Hub for
+# meta-llama/Llama-3.1-8B, then `huggingface-cli login` once, then:
+python scripts/warmup_gated_lm.py --download qwen2.5-0.5b qwen2.5-7b llama3.1-8b
+
+# COMPUTE NODE, once: the real small test (~10 min) on a 0.5B Qwen
+sbatch --partition=kempner_h100 --gres=gpu:1 --mem=48G --time=00:30:00 --cpus-per-task=2 \
+  --wrap 'module load python; source activate <env>; python scripts/warmup_gated_lm.py --test qwen2.5-0.5b'
+
+# then, per model, stage 1 (plans once per seed) -> stage 2 (reuses the dendrogram)
+for m in qwen2.5_7b llama3.1_8b; do for s in 0 1; do
+  j=$(sbatch --parsable --partition=kempner_h100 --export=ALL,SEED=$s --array=1-7 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_pythia_${m}_stage1.txt)
+  sbatch --dependency=afterany:$j --partition=kempner_h100 --export=ALL,SEED=$s --array=1-5 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_pythia_${m}_stage2.txt
+done; done
+```
+Add `--account=<pehlevan share>` to every sbatch if the partition's default is
+not it. Qwen's vocab is 151936, so the logits of a 512-token chunk are 4x
+OPT's; the chunked forward (8 rows) keeps that under 3 GB.

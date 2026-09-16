@@ -118,6 +118,11 @@ RESPONSES phi_i(x) = sigma(w_i^T x + b_i) and their outgoing columns:
                 transfer; under ReLU it reduces to the usual sum rule).
     refused     measure='gaussian', repair kernel/projection, the cylinder
                 score and its certificate, exact_damage.
+    gated MLPs  (Llama/Qwen: down(act(gate x) * (up x)); src.models.gated_lm)
+                a channel's response is act(g^T x) * (u^T x); the adapter makes
+                up_proj the prunable layer and hands the gate over as a
+                GatedActivation, and every helper above forms responses
+                through _responder(act, idx) so the gate rows follow the units.
 
 The ReLU path is untouched: adapters that do not declare an activation are
 treated as ReLU, so every recorded number is reproduced bit for bit.
@@ -140,7 +145,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from scipy.special import ndtr, owens_t
 
-from src.models.registry import PrunableModel, is_relu
+from src.models.registry import GatedActivation, PrunableModel, is_relu
 from src.pruning.registry import (
     PruneContext, PruneDecision, PruningMethod, forward_chunked,
     register_pruning_method)
@@ -997,10 +1002,12 @@ def realize(units: Units, ok: np.ndarray, clusters: list[list[int]],
         else:
             # Survivors are medoids, so their gauge is their own alpha; the
             # originals' responses come out in the true gain (alpha * normalized).
+            keep_idx = np.asarray(keep, dtype=int)
             G, B, Ehat, Eh = _relu_grams(Z, rows, biases, units.u, -units.rho,
                                          scale_b=units.alpha, act=act,
-                                         gain_a=units.alpha[np.asarray(keep, dtype=int)],
-                                         gain_b=units.alpha)
+                                         gain_a=units.alpha[keep_idx],
+                                         gain_b=units.alpha,
+                                         idx_a=keep_idx, idx_b=None)
     else:
         if mu is None or Sigma is None:
             raise ValueError(f"repair={repair!r} needs calibration moments")
@@ -1123,7 +1130,8 @@ def repair_deletion(model: PrunableModel, layer_idx: int, x: torch.Tensor,
         # G = Phi_keep^T Phi_keep / N, B = Phi_keep^T Phi_removed / N and the
         # two column means, formed on the GPU (see _relu_grams).
         fn_kw = ({"act": act, "gain_a": units.alpha[keep],
-                  "gain_b": units.alpha[removed]} if fn else {})
+                  "gain_b": units.alpha[removed], "idx_a": keep, "idx_b": removed}
+                 if fn else {})
         G, B, g1, b1 = _relu_grams(Z, units.u[keep], -units.rho[keep],
                                    units.u[removed], -units.rho[removed], **fn_kw)
     else:
@@ -1193,6 +1201,7 @@ def _relu_grams(Z: np.ndarray, rows_a: np.ndarray, bias_a: np.ndarray,
                 scale_b: np.ndarray | None = None, chunk: int = 4096,
                 act=None, gain_a: np.ndarray | None = None,
                 gain_b: np.ndarray | None = None,
+                idx_a: np.ndarray | None = None, idx_b: np.ndarray | None = None,
                 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Sample-average Grams of two rectified unit sets over the inputs Z.
 
@@ -1213,7 +1222,9 @@ def _relu_grams(Z: np.ndarray, rows_a: np.ndarray, bias_a: np.ndarray,
     responses are the model's own nonlinearity in the true gain, normalized
     back by it:  Phi = act((Z rows^T + bias) * gain) / gain.  Under ReLU that
     is the expression above to rounding; it is a separate branch so the ReLU
-    path stays bit-identical to the recorded runs.
+    path stays bit-identical to the recorded runs. `idx_a`/`idx_b` name which
+    of the layer's units the rows are; a GatedActivation needs them to pick
+    the matching gate rows (see _responder).
     """
     dev = _gram_device()
     f64 = dict(dtype=torch.float64, device=dev)
@@ -1232,14 +1243,15 @@ def _relu_grams(Z: np.ndarray, rows_a: np.ndarray, bias_a: np.ndarray,
             raise ValueError("act needs gain_a and gain_b (the units' RMS gauges)")
         ga = torch.as_tensor(np.where(gain_a > TINY, gain_a, 1.0), **f64)
         gb = torch.as_tensor(np.where(gain_b > TINY, gain_b, 1.0), **f64)
+        fa, fb = _responder(act, idx_a), _responder(act, idx_b)
     with torch.no_grad():
         for z in Zt.split(chunk):
             if act is None:
                 pa = torch.relu(z @ Ra.T + ba)
                 pb = torch.relu(z @ Rb.T + bb)
             else:
-                pa = act((z @ Ra.T + ba) * ga) / ga
-                pb = act((z @ Rb.T + bb) * gb) / gb
+                pa = fa((z @ Ra.T + ba) * ga, z) / ga
+                pb = fb((z @ Rb.T + bb) * gb, z) / gb
             if sb is not None:
                 pb = pb * sb
             G.addmm_(pa.T, pa)
@@ -1250,8 +1262,21 @@ def _relu_grams(Z: np.ndarray, rows_a: np.ndarray, bias_a: np.ndarray,
     return tuple(t.cpu().numpy() for t in out)
 
 
+def _responder(act, idx: np.ndarray | None):
+    """(pre, z) -> response of the layer's units `idx` (None: all, in order).
+
+    A plain activation (GELU, SiLU, ...) is a function of the pre-activation
+    alone. A GatedActivation (Llama/Qwen-style `act(gate z) * (up z)`; see
+    src.models.registry) also needs the layer input and WHICH units the
+    pre-activations belong to, so the gate rows can be matched. Every
+    functional-path helper forms its responses through this one seam."""
+    if isinstance(act, GatedActivation):
+        return act.gate(idx)
+    return lambda pre, z: act(pre)
+
+
 def _response_rms(Z: np.ndarray, W: np.ndarray, b: np.ndarray, act,
-                  chunk: int = 4096) -> np.ndarray:
+                  chunk: int = 4096, idx: np.ndarray | None = None) -> np.ndarray:
     """RMS over the rows of Z of the TRUE responses act(Z W^T + b), [H]. The
     functional path's gauge (extract_units). Streams rows so no N x H matrix
     is resident; runs on `_gram_device()` in float64."""
@@ -1260,15 +1285,17 @@ def _response_rms(Z: np.ndarray, W: np.ndarray, b: np.ndarray, act,
     Zt = torch.as_tensor(np.ascontiguousarray(Z), **f64)
     Wt, bt = torch.as_tensor(W, **f64), torch.as_tensor(b, **f64)
     ss = torch.zeros(Wt.shape[0], **f64)
+    f = _responder(act, idx)
     with torch.no_grad():
         for z in Zt.split(chunk):
-            p = act(z @ Wt.T + bt)
+            p = f(z @ Wt.T + bt, z)
             ss += (p * p).sum(dim=0)
     return np.sqrt((ss / max(Zt.shape[0], 1)).cpu().numpy())
 
 
 def _unit_responses(Z: np.ndarray, rows: np.ndarray, biases: np.ndarray,
-                    gains: np.ndarray, act, chunk: int = 4096) -> torch.Tensor:
+                    gains: np.ndarray, act, chunk: int = 4096,
+                    idx: np.ndarray | None = None) -> torch.Tensor:
     """RMS-normalized true responses act((Z rows^T + biases) * gains) / gains,
     as a float64 torch tensor [K, N] on `_gram_device()` -- what the
     functional-mode engine scores. Filled column-block by column-block so the
@@ -1279,10 +1306,11 @@ def _unit_responses(Z: np.ndarray, rows: np.ndarray, biases: np.ndarray,
     R, bb = torch.as_tensor(rows, **f64), torch.as_tensor(biases, **f64)
     g = torch.as_tensor(np.where(gains > TINY, gains, 1.0), **f64)
     out = torch.empty((R.shape[0], Zt.shape[0]), **f64)
+    f = _responder(act, idx)
     with torch.no_grad():
         start = 0
         for z in Zt.split(chunk):
-            out[:, start:start + z.shape[0]] = (act((z @ R.T + bb) * g) / g).T
+            out[:, start:start + z.shape[0]] = (f((z @ R.T + bb) * g, z) / g).T
             start += z.shape[0]
     return out
 
@@ -1615,7 +1643,7 @@ class _MashBase(PruningMethod):
         # true responses, RMS-normalized, [H_sub, N] on the Grams' device.
         Phi = None
         if fn and for_scoring and len(idx_map):
-            Phi = _unit_responses(Z, sub.u, -sub.rho, sub.alpha, act)
+            Phi = _unit_responses(Z, sub.u, -sub.rho, sub.alpha, act, idx=idx_map)
         return (units, ok, idx_map, frozen, sub, Z, mu, Sigma, x0, R, rad,
                 measure, act if fn else None, Phi)
 
