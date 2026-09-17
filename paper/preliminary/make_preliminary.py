@@ -87,11 +87,13 @@ def draw(ax, d, metric, color, ls, label):
             mew=0.6, label=label)
 
 
-def style(ax, title, metric, n_seeds):
+def style(ax, title, metric, n_seeds, lo=None):
     if metric == "ppl":
-        ax.set_yscale("log"); ax.set_ylim(15, 2000); ax.minorticks_off()
-        ax.set_yticks([20, 50, 100, 300, 1000])
-        ax.set_yticklabels(["20", "50", "100", "300", "1000"])
+        # floor follows the data: Qwen's dense perplexity is 9, OPT/Pythia's 15-20
+        floor = 15.0 if lo is None else min(15.0, 0.85 * lo)
+        ax.set_yscale("log"); ax.set_ylim(floor, 2000); ax.minorticks_off()
+        ticks = [t for t in (5, 10, 20, 50, 100, 300, 1000) if t >= floor]
+        ax.set_yticks(ticks); ax.set_yticklabels([str(t) for t in ticks])
         ax.set_ylabel("perplexity")
     else:
         ax.set_ylim(0, 1.0)
@@ -115,14 +117,15 @@ def curves_figure(name, note, arms_for, models=MODELS, ncol=4):
     ncol = min(ncol, len(models)); nrow = int(np.ceil(len(models) / ncol))
     fig, axes = plt.subplots(nrow, ncol, figsize=(3.6 * ncol, 3.1 * nrow), squeeze=False)
     for ax, (cell, title, metric) in zip(axes.flat, models):
-        n_seeds = 0
+        n_seeds, lo = 0, None
         for label, arm, ls, hue in arms_for(cell):
             d = load(f"{cell}__{arm}")
             if d is None:
                 continue
             draw(ax, d, metric, HUE[hue], ls, label)
             n_seeds = max(n_seeds, int(d.n.max()))
-        style(ax, title, metric, n_seeds)
+            lo = float(d[metric].min()) if lo is None else min(lo, float(d[metric].min()))
+        style(ax, title, metric, n_seeds, lo)
         if n_seeds:
             ax.legend(frameon=False, fontsize=5.8, ncol=1, handlelength=2.0,
                       loc="lower right" if metric == "ppl" else "lower left")
