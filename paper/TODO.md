@@ -22,8 +22,8 @@ Legend: `3/3` seeds done / wanted, `--` unrunnable by construction, `ARM?` arm n
 | osscar | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | **1/1** | **2/2** | **2/2** | 0/2 | **2/2** |
 | random_ridge | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | **1/1** | **3/2** | **2/2** | 0/2 | **2/2** |
 | magnitude_mass_ridge | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | **1/1** | **3/2** | **2/2** | 0/2 | **2/2** |
-| random_ridge_full | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | 0/2 | 0/2 | 0/2 | 0/2 |
-| magnitude_mass_ridge_full | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | 0/2 | 0/2 | 0/2 | 0/2 |
+| random_ridge_full | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | **2/2** | **2/2** | 0/2 | **2/2** |
+| magnitude_mass_ridge_full | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | **2/2** | **2/2** | 0/2 | **2/2** |
 
 ## C2 no repair
 
@@ -47,8 +47,8 @@ Legend: `3/3` seeds done / wanted, `--` unrunnable by construction, `ARM?` arm n
 | mash_ridge_medoid_empirical_delta_f | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | -- | -- | **2/2** | **2/2** | 0/2 | **2/2** |
 | random_ridge | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | **1/1** | **3/2** | **2/2** | 0/2 | **2/2** |
 | magnitude_mass_ridge | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **3/3** | **1/1** | **1/1** | **3/2** | **2/2** | 0/2 | **2/2** |
-| random_ridge_full | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | 0/2 | 0/2 | 0/2 | 0/2 |
-| magnitude_mass_ridge_full | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | 0/2 | 0/2 | 0/2 | 0/2 |
+| random_ridge_full | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | **2/2** | **2/2** | 0/2 | **2/2** |
+| magnitude_mass_ridge_full | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | **2/2** | **2/2** | 0/2 | **2/2** |
 
 ## C4 measure (FC only)
 
@@ -86,12 +86,12 @@ Legend: `3/3` seeds done / wanted, `--` unrunnable by construction, `ARM?` arm n
 - **wikitext_opt1.3b** (2 cells, 4 seed-runs): mash_gaussian_merge_sum_delta_f (+2), mash_ridge_gaussian_merge_empirical_delta_f (+2)
 - **wikitext_opt2.7b**: complete
 - **wikitext_opt6.7b**: complete
-- **wikitext_pythia1.4b** (2 cells, 4 seed-runs): magnitude_mass_ridge_full (+2), random_ridge_full (+2)
-- **wikitext_pythia2.8b** (2 cells, 4 seed-runs): magnitude_mass_ridge_full (+2), random_ridge_full (+2)
+- **wikitext_pythia1.4b**: complete
+- **wikitext_pythia2.8b**: complete
 - **wikitext_pythia6.9b** (13 cells, 26 seed-runs): magnitude_mass (+2), magnitude_mass_ridge (+2), magnitude_mass_ridge_full (+2), mash_drop_none_delta_f (+2), mash_full_medoid_empirical_delta_f (+2), mash_medoid_none_delta_f (+2), mash_medoid_sum_delta_f (+2), mash_ridge_medoid_empirical_delta_f (+2), osscar (+2), osscar_norepair (+2), random (+2), random_ridge (+2), random_ridge_full (+2)
-- **wikitext_qwen2.5_7b** (2 cells, 4 seed-runs): magnitude_mass_ridge_full (+2), random_ridge_full (+2)
+- **wikitext_qwen2.5_7b**: complete
 
-**42 seed-runs missing in total.**
+**30 seed-runs missing in total.**
 
 ## Analysis figures (not benchmark cells)
 
