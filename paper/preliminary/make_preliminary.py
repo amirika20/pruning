@@ -141,7 +141,9 @@ def curves_figure(name, note, arms_for, models=MODELS, ncol=4):
 def repaired(m):
     dc = dict_for(m)
     return [("random + ridge", "random_ridge", "-", "random"),
+            ("random + ridge, all rows", "random_ridge_full", "--", "random"),
             ("magnitude + ridge", "magnitude_mass_ridge", "-", "magnitude"),
+            ("magnitude + ridge, all rows", "magnitude_mass_ridge_full", "--", "magnitude"),
             ("OSSCAR (own repair)", "osscar", "-", "OSSCAR"),
             (f"MASH delta_f {dc}, ridge 20k rows", f"mash_ridge_{dc}_empirical_delta_f", "--", "MASH delta_f"),
             ("MASH delta_f medoid+sum, ridge all rows", "mash_full_medoid_empirical_delta_f", "-", "MASH delta_f"),

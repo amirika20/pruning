@@ -610,3 +610,30 @@ fp16 and never hit it). Fixed in src/reproducibility.py (bf16 hashed through
 its raw 16-bit view; every other dtype's digest unchanged). Llama is dropped
 (user, 2026-09-16); the adapter keeps its short names. Resubmit the same
 loop after pulling.
+
+## 17. All-rows ridge for the baselines on the functional LMs (2026-09-17)
+
+Qwen2.5-7B is complete (12 arms x 2 seeds). Finding: the 20000-row repair
+subsample OVERFITS at width 18944 -- at 20% sparsity 15155 survivors are
+regressed on 20000 rows. random+ridge (21.0) was worse than random deletion
+(16.4), magnitude+ridge worse than magnitude alone up to 30%, and MASH with
+the 20k-row ridge sat at 14.6 while the SAME selection with every token
+(mash_full) was 10.7, second only to OSSCAR (10.4). OSSCAR always used all
+65536 tokens, so the same-repair comparison (C1b/C3) is confounded on the
+wide models until the baselines get the same rows. New arms
+`random_ridge_full`, `magnitude_mass_ridge_full` (max_rows 1e6 = every
+token), added to the `pythia` tier; run on Pythia-1.4b/2.8b and Qwen (6 cells
+x 2 seeds). Baselines do not plan, so no staging.
+
+```bash
+for s in 0 1; do
+  sbatch --partition=kempner_h100 --export=ALL,SEED=$s --array=1-6 --time=12:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_ridge_full_functional.txt
+done
+```
+Expect ~5 h per Qwen cell (magnitude_mass_ridge at 20k rows took 5.0 h;
+the Gram over 65k rows is 3x the rows but the solve dominates), ~1-2 h on
+Pythia. Two other Qwen findings for the paper's beyond-ReLU section:
+magnitude deletion beats MASH deletion at every sparsity there (the RMS
+output of a gated channel is a strong signal on its own), and medoid+sum is
+worse than plain deletion (the RMS-matched transfer assumes proportional
+responses; gated channels can match in scale and differ in sign pattern).

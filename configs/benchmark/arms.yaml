@@ -185,8 +185,10 @@ paper_big:
 pythia:
   - random
   - random_ridge
+  - random_ridge_full
   - magnitude_mass
   - magnitude_mass_ridge
+  - magnitude_mass_ridge_full
   - osscar
   - osscar_norepair
   - mash_medoid_none_delta_f
@@ -213,6 +215,15 @@ arms:
     kind: random
     params: {seed: 0, repair: empirical, ridge: 1.0e-2}
     note: "the same repair with OSSCAR's damping strength"
+  # ALL-ROWS RIDGE (decided 2026-09-17): the 20000-row subsample overfits once the
+  # survivor count approaches it -- at Qwen2.5-7B (H=18944) random+ridge was
+  # WORSE than random deletion at 20-30%, while MASH's all-rows arm (mash_full)
+  # was second only to OSSCAR. max_rows above the 65536 calibration tokens means
+  # every token, the rows OSSCAR and mash_full use. Same selection as *_ridge.
+  - name: random_ridge_full
+    kind: random
+    params: {seed: 0, repair: empirical, ridge: 1.0e-2, max_rows: 1000000}
+    note: "random_ridge with every calibration token in the repair"
 
   # -- magnitude, all four norms. The gap between `mass` and the rest measures
   #    the gauge argument: a function-preserving rescale (w,b,c)->(tw,tb,c/t)
@@ -236,6 +247,10 @@ arms:
   - name: magnitude_mass_ridge
     kind: magnitude
     params: {norm: mass, repair: empirical, ridge: 1.0e-2}
+  - name: magnitude_mass_ridge_full
+    kind: magnitude
+    params: {norm: mass, repair: empirical, ridge: 1.0e-2, max_rows: 1000000}
+    note: "magnitude_mass_ridge with every calibration token in the repair (see random_ridge_full)"
 
   # -- saturated: the free tier -----------------------------------------------
   - name: saturated_dead_empirical

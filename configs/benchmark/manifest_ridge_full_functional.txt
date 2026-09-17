@@ -1,0 +1,6 @@
+configs/benchmark/generated/wikitext_pythia1.4b/random_ridge_full.yaml
+configs/benchmark/generated/wikitext_pythia1.4b/magnitude_mass_ridge_full.yaml
+configs/benchmark/generated/wikitext_pythia2.8b/random_ridge_full.yaml
+configs/benchmark/generated/wikitext_pythia2.8b/magnitude_mass_ridge_full.yaml
+configs/benchmark/generated/wikitext_qwen2.5_7b/random_ridge_full.yaml
+configs/benchmark/generated/wikitext_qwen2.5_7b/magnitude_mass_ridge_full.yaml

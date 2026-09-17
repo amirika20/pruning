@@ -43,12 +43,13 @@ CLAIMS = {
     "C1a overlap (removal sets)": ["mash_medoid_none_delta_f", "osscar_norepair", "magnitude_mass"],
     "C1b same repair": ["mash_full_medoid_empirical_delta_f", "mash_ridge_medoid_empirical_delta_f",
                         "mash_ridge_merge_empirical_delta_f", "osscar", "random_ridge",
-                        "magnitude_mass_ridge"],
+                        "magnitude_mass_ridge", "random_ridge_full", "magnitude_mass_ridge_full"],
     "C2 no repair": ["random", "magnitude_mass", "osscar_norepair", "mash_medoid_none_delta_f",
                      "mash_drop_none_delta_f", "mash_medoid_sum_delta_f", "mash_merge_sum_delta_f"],
     "C3 overall + cost": ["osscar", "mash_full_medoid_empirical_delta_f",
                           "mash_ridge_merge_empirical_delta_f", "mash_ridge_medoid_empirical_delta_f",
-                          "random_ridge", "magnitude_mass_ridge"],
+                          "random_ridge", "magnitude_mass_ridge", "random_ridge_full",
+                          "magnitude_mass_ridge_full"],
     "C4 measure (FC only)": ["mash_merge_sum_delta_f", "mash_gaussian_merge_sum_delta_f",
                              "mash_ridge_merge_empirical_delta_f",
                              "mash_ridge_gaussian_merge_empirical_delta_f",
@@ -75,14 +76,20 @@ PAPER_BIG = {"random", "random_ridge", "magnitude_mass", "magnitude_mass_ridge",
 # -- plus the activation-agnostic baselines. Same arm set for all of them.
 PYTHIA = {"wikitext_pythia1.4b", "wikitext_pythia2.8b", "wikitext_pythia6.9b",
           "wikitext_qwen2.5_7b"}
-PAPER_PYTHIA = {"random", "random_ridge", "magnitude_mass", "magnitude_mass_ridge", "osscar",
+PAPER_PYTHIA = {"random", "random_ridge", "random_ridge_full", "magnitude_mass",
+                "magnitude_mass_ridge", "magnitude_mass_ridge_full", "osscar",
                 "osscar_norepair", "mash_medoid_none_delta_f", "mash_drop_none_delta_f",
                 "mash_medoid_sum_delta_f", "mash_ridge_medoid_empirical_delta_f",
                 "mash_full_medoid_empirical_delta_f"}
 
 
+FULL_ROWS_ONLY_FUNCTIONAL = {"random_ridge_full", "magnitude_mass_ridge_full"}
+
+
 def applicable(arm: str, model: str) -> str | None:
     """None if runnable and planned; else why not."""
+    if arm in FULL_ROWS_ONLY_FUNCTIONAL and model not in PYTHIA:
+        return "all-rows baseline repair is run on the wide functional LMs only"
     if model in PYTHIA and arm not in PAPER_PYTHIA:
         return "not in the functional (GELU / gated) set"
     if model in BIG and arm not in PAPER_BIG:
