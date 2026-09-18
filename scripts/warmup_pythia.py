@@ -51,6 +51,10 @@ for _k, _v in (("TRANSFORMERS_NO_TF", "1"), ("TRANSFORMERS_NO_FLAX", "1"),
                ("TF_CPP_MIN_LOG_LEVEL", "3"), ("TF_ENABLE_ONEDNN_OPTS", "0")):
     os.environ.setdefault(_k, _v)
 
+# Line-buffered stdout: under sbatch, plain prints sit in a block buffer and a
+# job killed at its time limit leaves an empty-looking log.
+sys.stdout.reconfigure(line_buffering=True)
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
