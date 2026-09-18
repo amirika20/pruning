@@ -730,3 +730,27 @@ Figures: `python paper/main_text_figures/make_main_text.py --centroid post`
 draws the MASH curves from the `mash_post_*` cells (baselines unchanged) and
 writes `fig_*_post.{pdf,png}` beside the stock ones, so the two centroids can
 be compared panel by panel once the cells land.
+
+## 19. Llama-3.1-8B (2026-09-18)
+
+Hub access granted; the entry is back (`wikitext_llama3.1_8b`, 32 x 14336,
+bf16, 2 seeds), now with the 14-arm functional tier (incl. the all-rows
+baselines of §17). Stage 1 = 9 arms (baselines, OSSCAR, the planning MASH
+arm); stage 2 = the 5 MASH arms that reuse the dendrogram.
+
+```bash
+# LOGIN NODE, once: huggingface-cli login (token with access to meta-llama), then
+python scripts/warmup_gated_lm.py --download llama3.1-8b
+
+# COMPUTE NODE, once (~15 min): the real small test on Llama itself -- the 0.5B
+# Qwen test covered the gated path, this covers Llama's tokenizer/vocab/loader
+sbatch --partition=kempner_h100 --gres=gpu:1 --mem=64G --time=00:45:00 --cpus-per-task=2 \
+  --wrap 'module load python; source activate <env>; python scripts/warmup_gated_lm.py --test llama3.1-8b --n-val 8'
+
+for s in 0 1; do
+  j=$(sbatch --parsable --partition=kempner_h100 --export=ALL,SEED=$s --array=1-9 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_pythia_llama3.1_8b_stage1.txt)
+  sbatch --dependency=afterany:$j --partition=kempner_h100 --export=ALL,SEED=$s --array=1-5 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_pythia_llama3.1_8b_stage2.txt
+done
+```
+Add `--account=` for the pehlevan share if needed. Llama's vocab is 128256
+(logits 3.2x OPT's); the 8-row chunked forward held at Qwen's 151936.
