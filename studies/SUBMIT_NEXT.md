@@ -673,19 +673,53 @@ for m in imagenet_resnet50 imagenet_vit_b16; do
   sbatch --dependency=afterany:$j --array=1-$(wc -l < configs/benchmark/manifest_post_${m}_stage2.txt) scripts/slurm_large.sh configs/benchmark/manifest_post_${m}_stage2.txt
 done
 
-# OPT-2.7b / 6.7b: one seed, 80 GB card, 24 h wall, 96G host (see §11).
-# Resubmit the same line on a wall kill: plans_partial.json resumes it.
-for m in wikitext_opt2.7b wikitext_opt6.7b; do
-  j=$(sbatch --parsable --gres=gpu:h100:1 --export=ALL,SEED=0 --array=1-2 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_post_${m}_stage1.txt)
-  sbatch --dependency=afterany:$j --gres=gpu:h100:1 --export=ALL,SEED=0 --array=1-3 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_post_${m}_stage2.txt
-done
+# OPT-2.7b / 6.7b: one seed, 80 GB card, 24 h wall (see §11). Host memory
+# per model, see HOST MEMORY below. Resubmit the same line on a wall kill:
+# plans_partial.json resumes it.
+j=$(sbatch --parsable --gres=gpu:h100:1 --export=ALL,SEED=0 --array=1-2 --time=24:00:00 --mem=48G scripts/slurm_large.sh configs/benchmark/manifest_post_wikitext_opt2.7b_stage1.txt)
+sbatch --dependency=afterany:$j --gres=gpu:h100:1 --export=ALL,SEED=0 --array=1-3 --time=24:00:00 --mem=48G scripts/slurm_large.sh configs/benchmark/manifest_post_wikitext_opt2.7b_stage2.txt
+j=$(sbatch --parsable --gres=gpu:h100:1 --export=ALL,SEED=0 --array=1-2 --time=24:00:00 --mem=64G scripts/slurm_large.sh configs/benchmark/manifest_post_wikitext_opt6.7b_stage1.txt)
+sbatch --dependency=afterany:$j --gres=gpu:h100:1 --export=ALL,SEED=0 --array=1-3 --time=24:00:00 --mem=64G scripts/slurm_large.sh configs/benchmark/manifest_post_wikitext_opt6.7b_stage2.txt
 
-# Pythia-2.8b and Qwen2.5-7B: two seeds, per seed (§15-16 recipe)
-for m in wikitext_pythia2.8b wikitext_qwen2.5_7b; do for s in 0 1; do
-  j=$(sbatch --parsable --partition=kempner_h100 --export=ALL,SEED=$s --array=1-1 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_post_${m}_stage1.txt)
-  sbatch --dependency=afterany:$j --partition=kempner_h100 --export=ALL,SEED=$s --array=1-2 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_post_${m}_stage2.txt
-done; done
+# Pythia-2.8b (48G) and Qwen2.5-7B (64G): two seeds, per seed (§15-16 recipe)
+for s in 0 1; do
+  j=$(sbatch --parsable --partition=kempner_h100 --export=ALL,SEED=$s --array=1-1 --time=24:00:00 --mem=48G scripts/slurm_large.sh configs/benchmark/manifest_post_wikitext_pythia2.8b_stage1.txt)
+  sbatch --dependency=afterany:$j --partition=kempner_h100 --export=ALL,SEED=$s --array=1-2 --time=24:00:00 --mem=48G scripts/slurm_large.sh configs/benchmark/manifest_post_wikitext_pythia2.8b_stage2.txt
+  j=$(sbatch --parsable --partition=kempner_h100 --export=ALL,SEED=$s --array=1-1 --time=24:00:00 --mem=64G scripts/slurm_large.sh configs/benchmark/manifest_post_wikitext_qwen2.5_7b_stage1.txt)
+  sbatch --dependency=afterany:$j --partition=kempner_h100 --export=ALL,SEED=$s --array=1-2 --time=24:00:00 --mem=64G scripts/slurm_large.sh configs/benchmark/manifest_post_wikitext_qwen2.5_7b_stage2.txt
+done
 ```
+
+**HOST MEMORY.** Job Defense Shield flagged a 96G task at 38% peak
+utilization (about 36 GB used) and asks for 80% or more. The 96G in §6-17
+was never a measurement: it was a guess for the fp16/bf16 checkpoint load,
+and no cell recorded its peak until now. `run_sweep.py` writes
+`peak_host_gb` and `peak_cuda_gb` into every `report.json` and logs them at
+the end of the cell, so size from those from here on. The requests above
+are set at roughly 1.3x the plausible peak per model, never below the 48G
+the `slurm_large.sh` default already grants:
+
+| model | resident weights (host, at load) | --mem | if the peak is ~36 GB |
+|---|---|---|---|
+| ResNet-50, ViT-B/16 | 12 GB float calibration set + model | 48G (default) | 75% |
+| OPT-2.7b | fp32 10.6 GB | 48G | 75% |
+| OPT-6.7b | fp16 13.4 GB (fp32 transient at load ~27 GB) | 64G | 56% |
+| Pythia-2.8b | fp16 5.6 GB | 48G | 75% |
+| Qwen2.5-7B | bf16 15 GB | 64G | 56% |
+
+Going under 48G to please the meter is not worth an OOM kill on a 24 h
+cell. Before submitting, read the true peaks of the finished 96G jobs and
+tighten the table to 1.25x them:
+
+```bash
+sacct -u $USER -S 2026-09-10 -X -o JobID,JobName%22,ReqMem,Elapsed,State | head -40
+sacct -j <jobid> -o JobID,MaxRSS,ReqMem --units=G     # MaxRSS is on the .batch step
+```
+
+After the first stage-1 cell of each model finishes, `grep peak_host_gb
+$PRUNING_SCRATCH/results/<cell>/seed_0/report.json` gives the number the
+stage-2 line should be sized from (`scontrol update JobId=<stage2> MinMemoryNode=<n>G`
+works while it is still pending).
 
 Cost: 46 (config x seed) runs. Plans are the same order as the stock delta_f
 plans (the initial Gram dominates; the loop is now O(K) per step and frees

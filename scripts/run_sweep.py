@@ -37,6 +37,7 @@ import argparse
 import json
 import logging
 import math
+import resource
 import sys
 import time
 from pathlib import Path
@@ -312,8 +313,17 @@ def main() -> None:
                 {"cell": config.name, "arm": method.kind, "seed": seed,
                  "widths": widths, "plan_key": curve.attrs.get("plan_key"),
                  "layers": plans}))
+        # Peak memory of this cell, so --mem is sized from measurements rather
+        # than guesses: Job Defense Shield flags a task that uses under 80% of
+        # what it asked for, and an OOM kill loses a 24 h cell. ru_maxrss is
+        # kilobytes on Linux; the CUDA peak is per process since the last reset.
+        rep["peak_host_gb"] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**20
+        if torch.cuda.is_available():
+            rep["peak_cuda_gb"] = torch.cuda.max_memory_allocated() / 2**30
         (out / "report.json").write_text(json.dumps(rep, indent=2, default=str))
         logging.info("\n" + format_sweep({f"{config.name} s{seed}": rep}))
+        logging.info(f"peak memory: host {rep['peak_host_gb']:.1f} GB"
+                     + (f", cuda {rep['peak_cuda_gb']:.1f} GB" if "peak_cuda_gb" in rep else ""))
 
         if config.analyze_geometry:
             # At ONE width only: these batteries are per-model-pair, not
