@@ -351,6 +351,9 @@ entries:
     sweep_fractions: [0.02, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50, 0.65, 0.80]
     family: fc
     resources: large
+    # functional path: the merge dictionary is refused (no homogeneity), so the
+    # `post` tier's merge twins are excluded here as the pythia tier omits them
+    exclude_arms: [mash_post_merge_sum_delta_f, mash_post_ridge_merge_empirical_delta_f]
     analyze_geometry: false
     data: {kind: wikitext, params: {tokenizer: EleutherAI/pythia-70m, seq_len: 512,
                                     n_train: 128, n_val: 32, n_test: null}}
@@ -380,6 +383,8 @@ entries:
     sweep_fractions: [0.02, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50, 0.65, 0.80]
     family: fc
     resources: large
+    # functional path: merge refused, see wikitext_pythia2.8b
+    exclude_arms: [mash_post_merge_sum_delta_f, mash_post_ridge_merge_empirical_delta_f]
     analyze_geometry: false
     data: {kind: wikitext, params: {tokenizer: Qwen/Qwen2.5-7B, seq_len: 512,
                                     n_train: 128, n_val: 32, n_test: null}}

@@ -637,3 +637,62 @@ magnitude deletion beats MASH deletion at every sparsity there (the RMS
 output of a gated channel is a strong signal on its own), and medoid+sum is
 worse than plain deletion (the RMS-matched transfer assumes proportional
 responses; gated channels can match in scale and differ in sign pattern).
+
+## 18. Post-activation centroid on the six figure models (2026-09-17)
+
+`centroid: post` (commit 1b26844) makes the delta_f selection exact greedy
+Ward in response space: the cluster representative is the mass-weighted mean
+of the members' response rows and the costs follow Lance--Williams, so the
+loop never rebuilds a response and the [H, N] response matrix is freed after
+the initial Gram. On CIFAR ResNet-20 it beat the stock centroid under no
+repair (+1.6 AUC, +3.5 to +5.4 points at mid widths, every seed) and tied
+under the ridge (studies/post_ward). The `post` tier runs its twins of the
+four MASH arms the main-text figures draw, plus the deletion control, WITH
+and WITHOUT repair, on the six figure models:
+
+| model | arms | seeds |
+|---|---|---|
+| imagenet_resnet50 (BN: medoid only) | medoid+sum, medoid+none, full-row ridge | 0 1 2 |
+| imagenet_vit_b16 | + merge+sum, merge+ridge | 0 1 2 |
+| wikitext_opt2.7b, opt6.7b | same five as ViT | 0 |
+| wikitext_pythia2.8b, qwen2.5_7b (functional: medoid only) | same three as ResNet-50 | 0 1 |
+
+New plans: the plan key carries `centroid: post`, so nothing on disk is
+reused and each model pays one plan per dictionary per seed. Stage 1 runs the
+plan-producing cells (medoid+sum and, where it exists, merge+sum); stage 2
+reuses their dendrograms (run_sweep matches plan keys) for deletion and the
+ridge arms. Baselines are the ones already on disk; nothing else reruns.
+
+```bash
+git pull && git log --oneline -1     # >= the commit adding the post tier
+
+# ImageNet: three seeds per cell in sequence, one cell per task (12 GB
+# calibration set per process); ViT merge plans are ~10 min each
+for m in imagenet_resnet50 imagenet_vit_b16; do
+  j=$(sbatch --parsable --array=1-$(wc -l < configs/benchmark/manifest_post_${m}_stage1.txt) scripts/slurm_large.sh configs/benchmark/manifest_post_${m}_stage1.txt)
+  sbatch --dependency=afterany:$j --array=1-$(wc -l < configs/benchmark/manifest_post_${m}_stage2.txt) scripts/slurm_large.sh configs/benchmark/manifest_post_${m}_stage2.txt
+done
+
+# OPT-2.7b / 6.7b: one seed, 80 GB card, 24 h wall, 96G host (see §11).
+# Resubmit the same line on a wall kill: plans_partial.json resumes it.
+for m in wikitext_opt2.7b wikitext_opt6.7b; do
+  j=$(sbatch --parsable --gres=gpu:h100:1 --export=ALL,SEED=0 --array=1-2 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_post_${m}_stage1.txt)
+  sbatch --dependency=afterany:$j --gres=gpu:h100:1 --export=ALL,SEED=0 --array=1-3 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_post_${m}_stage2.txt
+done
+
+# Pythia-2.8b and Qwen2.5-7B: two seeds, per seed (§15-16 recipe)
+for m in wikitext_pythia2.8b wikitext_qwen2.5_7b; do for s in 0 1; do
+  j=$(sbatch --parsable --partition=kempner_h100 --export=ALL,SEED=$s --array=1-1 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_post_${m}_stage1.txt)
+  sbatch --dependency=afterany:$j --partition=kempner_h100 --export=ALL,SEED=$s --array=1-2 --time=24:00:00 --mem=96G scripts/slurm_large.sh configs/benchmark/manifest_post_${m}_stage2.txt
+done; done
+```
+
+Cost: 46 (config x seed) runs. Plans are the same order as the stock delta_f
+plans (the initial Gram dominates; the loop is now O(K) per step and frees
+the response matrix, so the OPT-6.7b plans should be no slower and use less
+GPU memory). The full-row ridge cells are the expensive solves (~5 h on Qwen).
+
+Figures: `python paper/main_text_figures/make_main_text.py --centroid post`
+draws the MASH curves from the `mash_post_*` cells (baselines unchanged) and
+writes `fig_*_post.{pdf,png}` beside the stock ones, so the two centroids can
+be compared panel by panel once the cells land.

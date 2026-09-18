@@ -1,0 +1,2 @@
+configs/benchmark/generated/wikitext_opt6.7b/mash_post_merge_sum_delta_f.yaml
+configs/benchmark/generated/wikitext_opt6.7b/mash_post_medoid_sum_delta_f.yaml

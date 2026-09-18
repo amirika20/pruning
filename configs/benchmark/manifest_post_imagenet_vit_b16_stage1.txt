@@ -1,0 +1,2 @@
+configs/benchmark/generated/imagenet_vit_b16/mash_post_merge_sum_delta_f.yaml
+configs/benchmark/generated/imagenet_vit_b16/mash_post_medoid_sum_delta_f.yaml

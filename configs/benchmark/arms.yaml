@@ -173,6 +173,18 @@ paper_big:
   - mash_ridge_merge_empirical_delta_f
   - mash_full_medoid_empirical_delta_f
 
+# POST-CENTROID tier (decided 2026-09-17): the `centroid: post` twins of the
+# MASH arms the main-text figures draw, with and without repair, for the six
+# figure models (ResNet-50, ViT-B/16, OPT-2.7b/6.7b, Pythia-2.8b, Qwen2.5-7B).
+# Merge arms are skipped automatically where merge is undefined (BatchNorm,
+# functional LMs). `--tier post --models <the six>`; studies/SUBMIT_NEXT.md §18.
+post:
+  - mash_post_medoid_none_delta_f
+  - mash_post_medoid_sum_delta_f
+  - mash_post_merge_sum_delta_f
+  - mash_post_ridge_merge_empirical_delta_f
+  - mash_post_full_medoid_empirical_delta_f
+
 # NON-ReLU LMs (Pythia, GELU; decided 2026-09-13): the arms whose selection
 # and repair read only the units' post-activation RESPONSES and outgoing
 # columns -- the "functional" subset of MASH (see the mash.py docstring). No
@@ -416,6 +428,48 @@ grids:
     fixed: {ridge: 1.0e-2, ridge_prior: sum, repair_rows: 0}
     axes:
       score: [delta_f, cylinder]
+      dictionary: [medoid]
+      repair: [empirical]
+
+  # POST-ACTIVATION CENTROID (promoted 2026-09-17, studies/post_ward): the
+  # delta_f cluster representative is the mass-weighted mean of the members'
+  # response rows, propagated by Lance--Williams -- exact greedy Ward in
+  # response space -- instead of the summed covector pushed through the
+  # activation. Selection only; realization and repair are unchanged. These
+  # are the `post` twins of the four MASH arms the main-text figures draw
+  # (medoid/merge + sum, merge + ridge, medoid + full-row ridge) plus the
+  # deletion control. New plans: the plan key carries centroid=post, so no
+  # recorded dendrogram is reused. Runs on ReLU and functional LMs alike.
+  - prefix: mash_post
+    kind: mash
+    fixed: {centroid: post}
+    axes:
+      score: [delta_f]
+      dictionary: [merge, medoid]
+      repair: [sum]
+    requires_nobn_when:
+      dictionary: [merge]
+  - prefix: mash_post
+    kind: mash
+    fixed: {centroid: post}
+    axes:
+      score: [delta_f]
+      dictionary: [medoid]
+      repair: [none]
+  - prefix: mash_post_ridge
+    kind: mash
+    fixed: {centroid: post, ridge: 1.0e-2}
+    axes:
+      score: [delta_f]
+      dictionary: [merge]
+      repair: [empirical]
+    requires_nobn_when:
+      dictionary: [merge]
+  - prefix: mash_post_full
+    kind: mash
+    fixed: {centroid: post, ridge: 1.0e-2, ridge_prior: sum, repair_rows: 0}
+    axes:
+      score: [delta_f]
       dictionary: [medoid]
       repair: [empirical]
 

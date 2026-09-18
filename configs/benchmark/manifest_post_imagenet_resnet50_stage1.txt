@@ -1,0 +1,1 @@
+configs/benchmark/generated/imagenet_resnet50/mash_post_medoid_sum_delta_f.yaml
