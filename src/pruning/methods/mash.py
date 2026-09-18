@@ -60,6 +60,27 @@ exactly the ones it got right); `gauge_correct=False` reproduces those numbers.
 can know what the ReLU clips -- that needs the measure. This is why the
 domain-only tier is a CERTIFICATE tier rather than a capacity tier.
 
+CENTROID (`centroid=`), for `delta_f` under the empirical measure: where the
+cluster representative that the remaining pairs are scored against lives.
+
+    pre         (default) the summed covector g_C = sum a_i u_i, pushed through
+                the activation: relu((g_C^T x - r_C) / ||g_C||). This is the
+                response the merge dictionary actually emits, and it is
+                rebuilt after every merge and rescored by one matvec over the
+                response matrix. Ward on the PRE-activation centroid, measured
+                post-activation. On the functional path the representative is
+                the medoid's response instead.
+    post        the mass-weighted mean of the members' response rows,
+                phibar_C = sum a_i phi_i / A_C. No single unit realizes it, so
+                it is a SELECTION-only device: classical Ward in response
+                space, whose increments obey the Lance--Williams recursion, so
+                after the initial Gram no response is read again and a step is
+                O(K). Defined on ReLU and functional layers alike. On CIFAR
+                ResNet-20 (studies/post_ward, 2026-09-17) it selects better
+                clusters than `pre` under the sum rule and deletion (+1.6 AUC
+                points, +3.5 to +5.4 accuracy points at mid widths, every
+                seed) and ties it under the ridge repair.
+
 DICTIONARY (`dictionary=`): `merge` emits the new mass-weighted hyperplane;
 `medoid` keeps each cluster's heaviest ORIGINAL unit and lets the repair absorb
 the rest. Only `merge` synthesizes a hyperplane, so only `merge` requires that
@@ -164,6 +185,10 @@ SCORES = ("cylinder", "delta_f", "exact_damage")
 # jointly load-bearing (deleting both is worse than deleting at random).
 DICTIONARIES = ("merge", "medoid", "drop")
 REPAIRS = ("none", "sum", "projection", "kernel", "empirical")
+# Where the delta_f cluster representative lives (module docstring, CENTROID):
+# `pre` rebuilds the emitted response from the summed covector; `post` is the
+# mean of the members' response rows, propagated by Lance--Williams.
+CENTROIDS = ("pre", "post")
 
 
 # ── rectified-Gaussian moments ───────────────────────────────────────────────
@@ -350,9 +375,17 @@ class MashEngine:
                  mu: np.ndarray | None = None, Sigma: np.ndarray | None = None,
                  gauge_correct: bool = True, row_cache: bool = True, measure: str = "gaussian",
                  Z: np.ndarray | None = None, dictionary: str = "merge",
-                 Phi: torch.Tensor | None = None, track_certificate: bool = True):
+                 Phi: torch.Tensor | None = None, track_certificate: bool = True,
+                 centroid: str = "pre"):
         if score not in SCORES:
             raise ValueError(f"score must be one of {SCORES}, got {score!r}")
+        if centroid not in CENTROIDS:
+            raise ValueError(f"centroid must be one of {CENTROIDS}, got {centroid!r}")
+        if centroid == "post" and (score != "delta_f" or measure != "empirical"):
+            raise ValueError(
+                "centroid='post' is Ward on the sampled response rows; it is "
+                "defined for score='delta_f' with measure='empirical' only "
+                f"(got score={score!r}, measure={measure!r})")
         if dictionary not in DICTIONARIES:
             raise ValueError(f"dictionary must be one of {DICTIONARIES}, "
                              f"got {dictionary!r}")
@@ -379,6 +412,8 @@ class MashEngine:
 
         self.orig = units
         self.score = score
+        self.centroid = centroid
+        self._post = centroid == "post"
         self.gauge_correct = gauge_correct
         # The dictionary is not used to SCORE anything -- it decides which atom
         # the certificate is written against, since that is the one `realize`
@@ -453,6 +488,11 @@ class MashEngine:
                 self._Zg = (Zt @ torch.as_tensor(self.g, device=dev).T).T.contiguous()  # [H, N]
                 self._Phi = self._responses(np.arange(H))      # torch [H, N]
             self._sq = (self._Phi * self._Phi).sum(1) / max(self._Phi.shape[1], 1)
+            # centroid='post': the singleton matrix below is already the Ward
+            # increment on the response rows, and Ward admits Lance--Williams,
+            # so the loop takes the same O(K) branch the cylinder score does
+            # and never reads a response again.
+            self._lw = self._post
         else:
             self.mu = np.asarray(mu, dtype=np.float64)
             Sig = np.asarray(Sigma, dtype=np.float64)
@@ -465,6 +505,11 @@ class MashEngine:
         if score == "exact_damage" and measure == "empirical":
             self._W = self.w @ self.w.T
         self._cost = self._all_costs()
+        if self._post:
+            # Nothing downstream reads the responses: the loop is
+            # Lance--Williams, realization re-derives what it needs from the
+            # units. Release them -- [H, N] float64 is 3.3 GB at H = N = 20000.
+            self._Phi = self._sq = self._Zg = None
         # Per-step profile of the greedy loop, accumulated in step() and logged
         # by plan(). Pythia-1.4b ran the loop at 41-85 ms/step (H100/A100) while
         # OPT-6.7b ran at 4 ms/step at twice the width; the pieces below are
@@ -728,7 +773,7 @@ class MashEngine:
             row_k_old = self._cost[k].copy()
             row_l_old = self._cost[l].copy()
 
-        fn = getattr(self, "_fn", False)
+        fn = getattr(self, "_fn", False) and not self._post
         if fn:
             med_k_old = self._medoid(k)
         self.members[k].extend(self.members[l])
@@ -740,7 +785,12 @@ class MashEngine:
         self._cost[l, :] = np.inf
         self._cost[:, l] = np.inf
 
-        if fn:
+        if self._post:
+            # centroid='post': the representative is the mean response row,
+            # and the Lance--Williams update below IS its Ward cost. No
+            # response exists to rebuild (the matrix was released at init).
+            pass
+        elif fn:
             # The merged cluster's response is its medoid's. Row k holds the
             # response of medoid(k) and row l that of medoid(l); the new medoid
             # is one of those two, so no response is ever recomputed.
@@ -1470,7 +1520,8 @@ class _MashBase(PruningMethod):
                  gauge_correct: bool = True, bias_fix: bool = False,
                  radius: str = "sup", measure: str | None = None,
                  max_rows: int = 20000, ridge: float = 1e-8,
-                 repair_rows: int | None = None, ridge_prior: str = "own"):
+                 repair_rows: int | None = None, ridge_prior: str = "own",
+                 centroid: str = "pre"):
         if score is not None:
             self.score = score
         if dictionary is not None:
@@ -1479,13 +1530,22 @@ class _MashBase(PruningMethod):
             self.repair = repair
         for name, val, allowed in (("score", self.score, SCORES),
                                    ("dictionary", self.dictionary, DICTIONARIES),
-                                   ("repair", self.repair, REPAIRS)):
+                                   ("repair", self.repair, REPAIRS),
+                                   ("centroid", centroid, CENTROIDS)):
             if val is not None and val not in allowed:
                 raise ValueError(f"{name} must be one of {allowed}, got {val!r}")
         if radius not in ("sup", "l2"):
             raise ValueError("radius must be 'sup' or 'l2'")
         if measure is not None and measure not in ("gaussian", "empirical"):
             raise ValueError("measure must be 'gaussian', 'empirical' or None")
+        # Where the delta_f cluster representative lives (module docstring,
+        # CENTROID). `post` is Ward on the sampled response rows, so it needs
+        # that score and that measure; None = empirical, which is fine.
+        if centroid == "post" and (self.score != "delta_f" or measure == "gaussian"):
+            raise ValueError(
+                "centroid='post' is defined for score='delta_f' under the "
+                f"empirical measure only (got score={self.score!r}, measure={measure!r})")
+        self.centroid = centroid
         self.n_calib = int(n_calib)
         self.gauge_correct = bool(gauge_correct)
         self.bias_fix = bool(bias_fix)
@@ -1527,13 +1587,22 @@ class _MashBase(PruningMethod):
         the CONFIGURED values (None = per-layer auto), which is what makes two
         configs comparable before any layer has been seen.
         """
-        return {"kind": "mash", "score": self.score,
-                # drop plans as medoid, so it shares the medoid dendrogram
-                "dictionary": "medoid" if self.dictionary == "drop" else self.dictionary,
-                "measure": self.measure or "empirical",
-                "gauge_correct": self.gauge_correct,
-                "radius": self.radius, "n_calib": self.n_calib,
-                "max_rows": self.max_rows}
+        key = {"kind": "mash", "score": self.score,
+               # drop plans as medoid, so it shares the medoid dendrogram
+               "dictionary": "medoid" if self.dictionary == "drop" else self.dictionary,
+               "measure": self.measure or "empirical",
+               "gauge_correct": self.gauge_correct,
+               "radius": self.radius, "n_calib": self.n_calib,
+               "max_rows": self.max_rows}
+        # The centroid changes the dendrogram, so it is part of the key -- but
+        # only when it is not the default. Every dendrogram.json recorded before
+        # the knob existed (2026-09-17) was planned with `pre` and carries no
+        # such field; writing "centroid": "pre" into every new key would make
+        # those plans unequal to their own configuration and force hours of
+        # re-planning at OPT scale for nothing.
+        if self.centroid != "pre":
+            key["centroid"] = self.centroid
+        return key
 
     # -- setup ------------------------------------------------------------
 
@@ -1810,7 +1879,8 @@ class _MashBase(PruningMethod):
                          Sigma=Sigma, gauge_correct=self.gauge_correct,
                          measure=measure, Z=Z, Phi=Phi,
                          dictionary="medoid" if self.dictionary == "drop" else self.dictionary,
-                         track_certificate=self.track_certificate)
+                         track_certificate=self.track_certificate,
+                         centroid=self.centroid)
         eng_init_seconds = time.perf_counter() - t_eng
         t_prep_end = time.perf_counter()
         recs = eng.dendrogram()
@@ -1898,7 +1968,8 @@ class MASH(_MashBase):
     different widths and the count would clamp the narrow ones.
 
     params: n_remove OR fraction, score, dictionary, repair, n_calib,
-            gauge_correct, bias_fix, radius. Defaults are the configuration
+            gauge_correct, bias_fix, radius, measure, centroid (pre | post,
+            module docstring CENTROID). Defaults are the configuration
             that performs best on fully connected layers: delta_f selection,
             merged dictionary, global kernel repair.
     """
@@ -1971,7 +2042,8 @@ class MASHCertified(_MashBase):
         eng = MashEngine(sub, score=self.score, x0=x0, radius=rad, mu=mu,
                          Sigma=Sigma, gauge_correct=self.gauge_correct,
                          measure=measure, Z=Z,
-                         dictionary="medoid" if self.dictionary == "drop" else self.dictionary)
+                         dictionary="medoid" if self.dictionary == "drop" else self.dictionary,
+                         centroid=self.centroid)
         if self.scale == "mass":
             denom = eng.mass_total()
         else:
@@ -2237,6 +2309,56 @@ def _selftest() -> None:  # pragma: no cover
             worst = max(worst, float(rel.max()))
     assert worst < 1e-9, f"Lance-Williams disagrees with direct Ward, {worst:.2e}"
 
+    # 9d. centroid='post': the same singleton matrix as `pre` (both are the
+    # Ward increment on the response rows), then Lance--Williams must equal
+    # the increment recomputed from the mass-weighted mean response rows of
+    # the CURRENT clusters -- and the two centroids must part ways after the
+    # first merges, or the knob would be a no-op.
+    Zp = rng.normal(size=(400, d))
+    e_pre = MashEngine(units, score="delta_f", measure="empirical", Z=Zp,
+                       dictionary="medoid", track_certificate=False)
+    e_post = MashEngine(units, score="delta_f", measure="empirical", Z=Zp,
+                        dictionary="medoid", track_certificate=False, centroid="post")
+    assert np.allclose(e_pre._cost, e_post._cost, equal_nan=True), \
+        "pre and post centroids must share the singleton matrix"
+    assert e_post._Phi is None, "post centroid must release the response matrix"
+    Phi_rows = np.maximum(Zp @ units.u.T - units.rho[None, :], 0.0).T   # unit gain
+    a_rows = units.mass
+    worst_post, parted = 0.0, False
+    for _ in range(H - 2):
+        e_pre.step(); e_post.step()
+        act = np.flatnonzero(e_post.active)
+        bars = np.stack([(a_rows[m][:, None] * Phi_rows[m]).sum(0) / a_rows[m].sum()
+                         for m in (np.array(e_post.members[k]) for k in act)])
+        A_ = e_post.A[act]
+        d2 = ((bars[:, None, :] - bars[None, :, :]) ** 2).sum(-1) / Zp.shape[0]
+        direct = np.outer(A_, A_) / (A_[:, None] + A_[None, :]) * d2
+        lw = e_post._cost[np.ix_(act, act)]
+        off = ~np.eye(len(act), dtype=bool)
+        # relative to the matrix scale: the planted exact duplicates have a
+        # true increment of 0, where both sides are rounding noise
+        worst_post = max(worst_post, float(
+            np.abs(lw[off] - direct[off]).max() / np.abs(direct[off]).max()))
+        # the two representatives differ (relu of the mean pre-activation is
+        # not the mean of the relus), so once a non-duplicate merge has
+        # happened the cost rows must differ even if the merge ORDER agrees
+        # on a layer this small
+        parted |= not np.allclose(e_pre._cost, e_post._cost, equal_nan=True, rtol=1e-6)
+    assert worst_post < 1e-9, \
+        f"post-centroid Lance-Williams disagrees with direct response-space Ward, {worst_post:.2e}"
+    assert parted, "pre and post centroids never diverged on a random layer"
+    for bad_kw in ({"centroid": "nope"}, {"centroid": "post", "score": "cylinder"},
+                   {"centroid": "post", "measure": "gaussian"}):
+        try:
+            build_pruning_method("mash", **bad_kw)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"expected ValueError for {bad_kw}")
+    assert "centroid" not in build_pruning_method("mash").plan_key(), \
+        "the default centroid must leave recorded plan keys unchanged"
+    assert build_pruning_method("mash", centroid="post").plan_key()["centroid"] == "post"
+
     # 9c. The row-minimum cache must reproduce the brute-force argmin's merge
     # sequence EXACTLY, ties included -- a different tie-break would be a
     # different method rather than a faster one. Duplicates and a dead unit are
@@ -2468,6 +2590,18 @@ def _selftest() -> None:  # pragma: no cover
         err = float((pr(Xg) - gref).abs().max())
     assert err < 1e-10, f"GELU duplicate merge + sum rule must be exact, got {err:.2e}"
     assert pr.fc1.out_features == Hg - 2
+    # centroid='post' runs on the functional path too (mean of the true
+    # response rows, no medoid response bookkeeping) and still frees the
+    # duplicates first, exactly
+    m_post = MASH(n_remove=2, score="delta_f", dictionary="medoid", repair="sum",
+                  centroid="post")
+    dec_p = m_post.select(gnet, 0, gctx)
+    assert (len(dec_p.remove) == 2 and len(set(dec_p.remove) & {2, 3}) == 1
+            and len(set(dec_p.remove) & {9, 10}) == 1), \
+        f"post centroid on GELU: duplicates must go first, removed {dec_p.remove}"
+    precs = m_post.plan(gnet, 0, gctx).recs
+    assert all(abs(r["cost"]) < 1e-12 * gscale for r in precs[:2]), \
+        f"post centroid on GELU: duplicates must be free, {[r['cost'] for r in precs[:3]]}"
 
     # auto defaults resolve to medoid + empirical on a GELU layer, and the
     # ReLU-only knobs are refused with a pointer to what to use
@@ -2553,6 +2687,8 @@ def _selftest() -> None:  # pragma: no cover
     print("  certified tier reports the ACCEPTED cut's certificate/cum_cost")
     print("  registry round-trip for mash / mash_certified + param validation")
     print(f"  Lance-Williams update == direct Ward increment ({worst:.1e})")
+    print(f"  centroid='post': same singletons as pre, LW == direct response-space "
+          f"Ward ({worst_post:.1e}), diverges after merges, refused off delta_f/empirical")
     print("  row-minimum cache == brute-force argmin, all 3 scores (exact)")
     print("  a layer with 0 or 1 mergeable units plans and emits empty, not raises")
     print("  conv+BN: patch extraction, medoid path, bit-exact zero removal,")
