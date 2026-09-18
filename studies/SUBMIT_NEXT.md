@@ -676,10 +676,10 @@ done
 # OPT-2.7b / 6.7b: one seed, 80 GB card, 24 h wall (see §11). Host memory
 # per model, see HOST MEMORY below. Resubmit the same line on a wall kill:
 # plans_partial.json resumes it.
-j=$(sbatch --parsable --gres=gpu:h100:1 --export=ALL,SEED=0 --array=1-2 --time=24:00:00 --mem=48G scripts/slurm_large.sh configs/benchmark/manifest_post_wikitext_opt2.7b_stage1.txt)
-sbatch --dependency=afterany:$j --gres=gpu:h100:1 --export=ALL,SEED=0 --array=1-3 --time=24:00:00 --mem=48G scripts/slurm_large.sh configs/benchmark/manifest_post_wikitext_opt2.7b_stage2.txt
-j=$(sbatch --parsable --gres=gpu:h100:1 --export=ALL,SEED=0 --array=1-2 --time=24:00:00 --mem=64G scripts/slurm_large.sh configs/benchmark/manifest_post_wikitext_opt6.7b_stage1.txt)
-sbatch --dependency=afterany:$j --gres=gpu:h100:1 --export=ALL,SEED=0 --array=1-3 --time=24:00:00 --mem=64G scripts/slurm_large.sh configs/benchmark/manifest_post_wikitext_opt6.7b_stage2.txt
+j=$(sbatch --parsable --partition=kempner_h100 --export=ALL,SEED=0 --array=1-2 --time=24:00:00 --mem=48G scripts/slurm_large.sh configs/benchmark/manifest_post_wikitext_opt2.7b_stage1.txt)
+sbatch --dependency=afterany:$j --partition=kempner_h100 --export=ALL,SEED=0 --array=1-3 --time=24:00:00 --mem=48G scripts/slurm_large.sh configs/benchmark/manifest_post_wikitext_opt2.7b_stage2.txt
+j=$(sbatch --parsable --partition=kempner_h100 --export=ALL,SEED=0 --array=1-2 --time=24:00:00 --mem=64G scripts/slurm_large.sh configs/benchmark/manifest_post_wikitext_opt6.7b_stage1.txt)
+sbatch --dependency=afterany:$j --partition=kempner_h100 --export=ALL,SEED=0 --array=1-3 --time=24:00:00 --mem=64G scripts/slurm_large.sh configs/benchmark/manifest_post_wikitext_opt6.7b_stage2.txt
 
 # Pythia-2.8b (48G) and Qwen2.5-7B (64G): two seeds, per seed (§15-16 recipe)
 for s in 0 1; do
